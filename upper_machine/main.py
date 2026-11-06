@@ -38,12 +38,12 @@ from .camera import ThreadedCamera
 from .config import TaskCode
 from .detection import detect_blocks, detect_rings
 from .digit import DigitClassifier
-from .display import draw_blocks, draw_rings, draw_task_code, draw_status
+from .display import draw_blocks, draw_rings, draw_status, draw_task_code
 from .qr_code import init_qr_detector, parse_task_code
 from .serial_comm import (
-    SerialSender, MODE_BLOCK, MODE_RING,
-    MSG_GRIPPER_COUNT, GRIPPER_PICK_INC, GRIPPER_PICK_DEC,
-    GRIPPER_PLACE_INC, GRIPPER_PLACE_DEC, GRIPPER_RESET, GRIPPER_SET
+    MODE_BLOCK,
+    MODE_RING,
+    SerialSender,
 )
 from .status_display import TaskDisplay
 
@@ -59,19 +59,19 @@ def parse_camera_src(val: str) -> int | str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Upper machine: QR + color block/black-ring detector")
 
-    # Camera defaults: QR=0, Block=/dev/video20
-    parser.add_argument("--qr-camera", type=str, default="0",
+    # Camera defaults: QR=0, Block=/dev/video0
+    parser.add_argument("--qr-camera", type=str, default="2",
                         help="Camera index or path for QR scanning (default '0')")
-    parser.add_argument("--block-camera", type=str, default="/dev/video20",
-                        help="Camera index or path for block/ring detection (default '/dev/video20')")
+    parser.add_argument("--block-camera", type=str, default="/dev/video0",
+                        help="Camera index or path for block/ring detection (default '/dev/video0')")
     parser.add_argument("--no-qr", action="store_true",
                         help="Disable QR camera (single-camera mode: only serial + block camera)")
     parser.add_argument("--width", type=int, default=640, help="Frame width")
     parser.add_argument("--height", type=int, default=480, help="Frame height")
 
-    # Serial defaults: /dev/ttyUSB0, enabled by default
-    parser.add_argument("--serial-port", type=str, default="/dev/ttyUSB0",
-                        help="Serial port (default '/dev/ttyUSB0')")
+    # Serial defaults: /dev/ttyS1, enabled by default
+    parser.add_argument("--serial-port", type=str, default="/dev/ttyS1",
+                        help="Serial port (default '/dev/ttyS1')")
     parser.add_argument("--baudrate", type=int, default=115200)
     parser.add_argument("--no-serial", action="store_true", help="Disable serial output")
     parser.add_argument("--list-ports", action="store_true",
@@ -389,13 +389,13 @@ def main(argv: list[str] | None = None):
                         ]
                         print(f"[Vision RING] {len(rings)} ring(s): {', '.join(desc_list)}")
                     else:
-                        print(f"[Vision RING] 0 ring(s): none")
+                        print("[Vision RING] 0 ring(s): none")
                 else:
                     if blocks:
                         desc_list = [f"{b.color}@({b.cx},{b.cy},r={b.radius})" for b in blocks]
                         print(f"[Vision BLOCK] {len(blocks)} block(s): {', '.join(desc_list)}")
                     else:
-                        print(f"[Vision BLOCK] 0 block(s): none")
+                        print("[Vision BLOCK] 0 block(s): none")
             last_send_time = now
 
         # ── Keyboard ─────────────────────────────────────────────────────────
