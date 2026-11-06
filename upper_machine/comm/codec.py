@@ -117,15 +117,10 @@ class RdlcCodec:
             if byte == FRAME_HEAD:
                 self._start_frame()
             return None
-        if byte == FRAME_HEAD:
-            self._start_frame()
-            return None
         if self._state is _State.TAIL:
             if byte != FRAME_TAIL:
                 raise RdlcDecodeError("Missing RDLC frame tail")
             return self._finish_frame()
-        if byte == FRAME_TAIL:
-            raise RdlcDecodeError("Unexpected RDLC frame tail")
         return self._consume_data(byte)
 
     def _start_frame(self) -> None:
