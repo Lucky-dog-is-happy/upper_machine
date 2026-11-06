@@ -361,7 +361,7 @@ def detect_blocks(hsv: np.ndarray,
 
 
 def dedup_concentric_circles(circles: list[tuple[int, int, int]],
-                             tolerance: int = 5) -> list[tuple[int, int, int]]:
+                             tolerance: int = 25) -> list[tuple[int, int, int]]:
     """Keep only the largest circle from each group of concentric detections."""
     remaining = list(circles)
     result = []
@@ -377,7 +377,7 @@ def dedup_concentric_circles(circles: list[tuple[int, int, int]],
 
 def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
-                 param2: float = 0.8,
+                 param2: float = 0.72,
                  digit_classifier: "DigitClassifier | None" = None,
                  max_rings: int = 3) -> list[RingInfo]:
     """Detect ground black circular rings and classify inner digits 1, 2, 3."""
@@ -431,7 +431,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
             extract_digit_scores_from_ring(frame, cx, cy, r, digit_classifier)
             for cx, cy, r, _ in selected
         ]
-        assigned_ids = match_rings_to_digits(scores_list, min_confidence=0.45)
+        assigned_ids = match_rings_to_digits(scores_list, min_confidence=0.35)
     else:
         assigned_ids = [5] * len(selected)
 
@@ -663,8 +663,8 @@ def main():
     parser.add_argument("--ring-max-radius", type=int, default=200, help="Max ring radius (px)")
     parser.add_argument("--ring-min-area", type=int, default=100,
                         help="Min ring color area (px) to accept a ring (default 100, adaptive for small rings)")
-    parser.add_argument("--ring-param2", type=float, default=0.8,
-                        help="HoughCircles param2 (circle perfectness, default 0.8) for ring detection")
+    parser.add_argument("--ring-param2", type=float, default=0.72,
+                        help="HoughCircles param2 (circle perfectness, default 0.72) for ring detection")
     parser.add_argument("--flip-h", action="store_true",
                         help="Horizontally flip camera frame (for mirrored cameras)")
     parser.add_argument("--flip-v", action="store_true",

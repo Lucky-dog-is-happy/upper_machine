@@ -3,14 +3,15 @@
 Features:
   - Concentric target adaptation: extracts core digit region (inner_ratio=0.42)
     to completely avoid the inner concentric ring border.
-  - Automatic mirror invariance: evaluates characters in both standard and horizontally
-    flipped orientations to seamlessly support mirrored cameras or inverted target papers.
-  - Multi-feature topological classifier:
-      • Aspect ratio: distinguishes slender 1 (aspect >= 1.75)
-      • Bottom baseline solid density: digit 2 has a solid, continuous horizontal base
-      • Middle-left waist indentation: digit 3 has deep inward hollows on its middle-left
-      • Multi-font normalized template correlation
-  - Global mutual exclusion assignment: uniquely maps up to 3 detected rings to digits 1, 2, 3.
+  - Multi-orientation dual evaluation (0 deg & 180 deg) to support both forward
+    and opposite-side robot viewing angles, plus horizontal mirroring.
+  - Robust topological separation between 2 and 3:
+      • Lower-mid (Y 65%~82%) horizontal centroid:
+          - Digit 2 is heavily on the left (X_cg <= 0.40) due to diagonal stroke.
+          - Digit 3 is heavily on the right (X_cg >= 0.60) due to lower curve hollow.
+      • Digit 1: slender vertical stroke (aspect >= 1.75).
+  - Multi-font normalized template matching fused with topological scores.
+  - Global mutual exclusion assignment: uniquely maps detected rings to digits 1, 2, 3.
 """
 
 import os
@@ -97,89 +98,104 @@ def create_digit_templates(size: int = NORM_SIZE) -> dict[int, list[np.ndarray]]
 
 
 class DigitClassifier:
-    """Classifies binary candidate crop into 1, 2, or 3 with automatic mirror-invariance."""
+    """Classifies binary candidate crop into 1, 2, or 3 using geometric topology + template correlation."""
 
     def __init__(self):
         self.templates = create_digit_templates(size=NORM_SIZE)
 
-    def _evaluate_single_orientation(self, binary_crop: np.ndarray) -> dict[int, float]:
-        """Evaluate a binary crop in one orientation."""
-        h, w = binary_crop.shape[:2]
-        if h < 8 or w < 3:
+    def _evaluate_single_view(self, t: np.ndarray) -> dict[int, float]:
+        """Evaluate a binary crop in a specific orientation."""
+        th, tw = t.shape[:2]
+        if th < 8 or tw < 3:
             return {1: 0.0, 2: 0.0, 3: 0.0}
 
-        aspect = h / float(w)
+        aspect = th / float(tw)
 
         # 1. Template Matching Correlation
-        pad = max(2, int(max(h, w) * 0.1))
-        padded = cv2.copyMakeBorder(binary_crop, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
+        pad = max(2, int(max(th, tw) * 0.1))
+        padded = cv2.copyMakeBorder(t, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
         norm = cv2.resize(padded, (NORM_SIZE, NORM_SIZE))
 
-        tpl_scores = {}
-        for d, tpl_list in self.templates.items():
-            best_s = 0.0
-            for tpl in tpl_list:
+        tpl_s = {}
+        for d in [1, 2, 3]:
+            s = 0.0
+            for tpl in self.templates[d]:
                 res = cv2.matchTemplate(norm, tpl, cv2.TM_CCOEFF_NORMED)
-                best_s = max(best_s, float(res[0][0]))
-            tpl_scores[d] = max(0.0, best_s)
+                s = max(s, float(res[0][0]))
+            tpl_s[d] = max(0.0, s)
 
-        # 2. Geometric & Topological Metrics
-        bot_left = binary_crop[int(h * 0.75):, :max(1, int(w * 0.35))]
-        bot_left_density = (np.mean(bot_left) / 255.0) if bot_left.size > 0 else 0.0
-
-        mid_left = binary_crop[int(h * 0.35):int(h * 0.65), :max(1, int(w * 0.35))]
-        mid_left_density = (np.mean(mid_left) / 255.0) if mid_left.size > 0 else 0.0
-
-        bot_strip = binary_crop[int(h * 0.85):, :]
-        if bot_strip.size > 0:
-            cols = np.where(np.any(bot_strip > 100, axis=0))[0]
-            bot_span = (cols[-1] - cols[0] + 1) / float(w) if len(cols) > 0 else 0.0
+        # 2. Key Geometric Features
+        # Lower-mid (Y 65% ~ 82%) horizontal centroid X
+        lower_mid = t[int(th * 0.65):int(th * 0.82), :]
+        ys, xs = np.where(lower_mid > 100)
+        if len(xs) > 0:
+            cg_x = np.mean(xs) / float(tw)
         else:
-            bot_span = 0.0
+            cg_x = 0.50
 
-        # Base scores from template matching
-        scores = {d: tpl_scores.get(d, 0.0) * 0.40 for d in [1, 2, 3]}
+        # Mid-waist (Y 42% ~ 55%) width span
+        mid_strip = t[int(th * 0.42):int(th * 0.55), :]
+        if mid_strip.size > 0:
+            mid_cols = np.where(np.any(mid_strip > 100, axis=0))[0]
+            mid_span = (mid_cols[-1] - mid_cols[0] + 1) / float(tw) if len(mid_cols) > 0 else 0.0
+        else:
+            mid_span = 0.0
 
-        # ── Rules for Digit 1 ──
+        # 3. Fuse Template and Geometry
+        scores = {1: tpl_s[1] * 0.5, 2: tpl_s[2] * 0.5, 3: tpl_s[3] * 0.5}
+
+        # Rules for 1 (Slender vertical body)
         if aspect >= 1.75:
-            scores[1] += 0.60
+            scores[1] += 0.50
             scores[2] -= 0.30
             scores[3] -= 0.30
-        elif aspect >= 1.35 and mid_left_density < 0.12 and bot_span < 0.65:
-            scores[1] += 0.35
+        elif aspect < 1.30:
+            scores[1] -= 0.40
 
-        # ── Rules for Digit 2 (Solid horizontal base line) ──
-        if bot_left_density >= 0.45 and bot_span >= 0.70 and aspect < 1.75:
-            scores[2] += 0.60
-            scores[1] -= 0.20
+        # Rules for 2 vs 3 (Lower-mid centroid is the ground-truth discriminator):
+        # Digit 2: cg_x <= 0.40 (diagonal stroke occupies the left half)
+        # Digit 3: cg_x >= 0.60 (lower circle hollow leaves the left half empty, black is on the right)
+        if cg_x <= 0.40 and aspect < 1.75:
+            scores[2] += 0.50
             scores[3] -= 0.35
-        elif bot_span >= 0.65 and aspect < 1.75:
-            scores[2] += 0.40
-
-        # ── Rules for Digit 3 (Hollow mid-left waist, non-solid left bottom) ──
-        if mid_left_density <= 0.20 and bot_left_density < 0.45 and aspect < 1.75:
-            scores[3] += 0.60
-            scores[1] -= 0.20
-            scores[2] -= 0.30
-        elif mid_left_density <= 0.28 and aspect < 1.75:
-            scores[3] += 0.35
+        elif cg_x >= 0.60 and aspect < 1.75:
+            scores[3] += 0.50
+            scores[2] -= 0.35
+        else:
+            # Transition zone: check mid waist beam
+            if mid_span >= 0.45 and aspect < 1.75:
+                scores[3] += 0.30
+            elif aspect < 1.75:
+                scores[2] += 0.30
 
         return {d: max(0.0, min(1.0, float(s))) for d, s in scores.items()}
 
     def evaluate(self, binary_crop: np.ndarray) -> dict[int, float]:
-        """Return confidence scores (0.0 ~ 1.0) with automatic mirror-invariance."""
-        # Evaluate standard orientation
-        scores_orig = self._evaluate_single_orientation(binary_crop)
+        """Return confidence scores (0.0 ~ 1.0) with consistent view-level orientation adaptation."""
+        h, w = binary_crop.shape[:2]
+        if h < 8 or w < 3:
+            return {1: 0.0, 2: 0.0, 3: 0.0}
 
-        # Evaluate horizontally flipped orientation (handles mirrored camera feeds)
-        flipped_crop = cv2.flip(binary_crop, 1)
-        scores_flipped = self._evaluate_single_orientation(flipped_crop)
+        orientations = [
+            binary_crop,
+            cv2.rotate(binary_crop, cv2.ROTATE_180),
+            cv2.flip(binary_crop, 1),
+        ]
 
-        # Merge by taking the best score for each digit
-        return {
-            d: max(scores_orig.get(d, 0.0), scores_flipped.get(d, 0.0))
-            for d in [1, 2, 3]
-        }
+        best_view_scores = {1: 0.0, 2: 0.0, 3: 0.0}
+        best_peak_margin = -999.0
+
+        for view in orientations:
+            s = self._evaluate_single_view(view)
+            sorted_s = sorted(s.values(), reverse=True)
+            peak = sorted_s[0]
+            margin = peak - sorted_s[1]
+            composite = peak + margin
+            if composite > best_peak_margin:
+                best_peak_margin = composite
+                best_view_scores = s
+
+        return best_view_scores
 
 
 def extract_digit_scores_from_ring(frame: np.ndarray,
@@ -224,7 +240,6 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
     min_area = max(15, int(np.pi * (inner_r ** 2) * 0.02))
     max_area = int(np.pi * (inner_r ** 2) * 0.85)
 
-    # Select candidate contours that are centrally located inside the circle
     candidates = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -240,16 +255,11 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
     if not candidates:
         return {1: 0.0, 2: 0.0, 3: 0.0}
 
-    # If multiple fragments exist near the center, also consider merged bounding box
-    best_scores = {1: 0.0, 2: 0.0, 3: 0.0}
-
-    # Evaluate the largest clean central contour
     largest = max(candidates, key=lambda c: c[1])
     _, _, _, lbx, lby, lbw, lbh = largest
     crop_largest = thresh[lby:lby + lbh, lbx:lbx + lbw]
     best_scores = classifier.evaluate(crop_largest)
 
-    # If multiple central pieces exist (e.g. broken stroke), evaluate merged bbox
     if len(candidates) > 1:
         min_bx = min(c[3] for c in candidates)
         min_by = min(c[4] for c in candidates)

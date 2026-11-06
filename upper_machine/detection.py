@@ -94,7 +94,7 @@ def detect_blocks(hsv: np.ndarray,
 
 
 def dedup_concentric_circles(circles: list[tuple[int, int, int]],
-                             tolerance: int = 5) -> list[tuple[int, int, int]]:
+                             tolerance: int = 25) -> list[tuple[int, int, int]]:
     """Keep only the largest circle from each group of concentric detections."""
     remaining = list(circles)
     result = []
@@ -110,7 +110,7 @@ def dedup_concentric_circles(circles: list[tuple[int, int, int]],
 
 def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
-                 param2: float = 0.8,
+                 param2: float = 0.72,
                  digit_classifier: DigitClassifier | None = None,
                  max_rings: int = 3) -> list[RingInfo]:
     """Detect black circular rings on the ground and classify inner digits (1, 2, 3).
@@ -176,7 +176,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
             extract_digit_scores_from_ring(frame, cx, cy, r, digit_classifier)
             for cx, cy, r, _ in selected
         ]
-        assigned_ids = match_rings_to_digits(scores_list, min_confidence=0.45)
+        assigned_ids = match_rings_to_digits(scores_list, min_confidence=0.35)
     else:
         assigned_ids = [5] * len(selected)
 

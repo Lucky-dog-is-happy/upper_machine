@@ -101,8 +101,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ring-max-radius", type=int, default=200)
     parser.add_argument("--ring-min-area", type=int, default=100,
                         help="Min black pixel count inside ring annulus (default 100, adaptive for small rings)")
-    parser.add_argument("--ring-param2", type=float, default=0.8,
-                        help="HoughCircles param2 (circle perfectness, 0~1, default 0.8)")
+    parser.add_argument("--ring-param2", type=float, default=0.72,
+                        help="HoughCircles param2 (circle perfectness, 0~1, default 0.72)")
 
     parser.add_argument("--flip-h", action="store_true",
                         help="Horizontally flip camera frame (for mirrored cameras)")
