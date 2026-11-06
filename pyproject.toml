@@ -1,0 +1,11 @@
+[project]
+name = "gongchuang"
+version = "0.1.0"
+description = "WeChat QR Code detection and decoding system"
+requires-python = ">=3.10"
+dependencies = [
+    "opencv-contrib-python>=4.5.3",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "requests>=2.28.0",
+]

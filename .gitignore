@@ -1,0 +1,32 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment & tools
+.venv/
+venv/
+env/
+.env
+
+# Large archives & PDFs
+*.zip
+*.7z
+*.tar.*
+*.pdf
+
+# External references & hardware vendor libraries
+ROS应用/
+多主控通讯/
+YbImuLib/
+reference/
+24年赛题H题/
+imu校准/
+驱动库/
+wechat-qrcode-master/
+images_videos/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

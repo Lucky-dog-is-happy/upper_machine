@@ -1,0 +1,107 @@
+"""Color configuration, HSV thresholds, and data structures."""
+
+from dataclasses import dataclass, field
+
+import numpy as np
+
+
+# ── Color ID mapping ──────────────────────────────────────────────────────────
+
+COLOR_MAP = {
+    1: "red",
+    2: "yellow",
+    3: "blue",
+    4: "green",
+    5: "black",
+    6: "sky-blue",
+}
+
+COLOR_NAME_TO_ID = {
+    "red": 1, "yellow": 2, "blue": 3, "green": 4, "black": 5, "sky-blue": 6,
+}
+
+
+# ── Block HSV thresholds ─────────────────────────────────────────────────────
+
+COLOR_HSV = {
+    "red": {
+        "lower": np.array([0, 70, 70]),
+        "upper": np.array([10, 255, 255]),
+        "bgr": (0, 0, 255),
+    },
+    "red2": {
+        "lower": np.array([156, 70, 70]),
+        "upper": np.array([180, 255, 255]),
+        "bgr": (0, 0, 255),
+    },
+    "yellow": {
+        "lower": np.array([15, 75, 70]),
+        "upper": np.array([35, 255, 255]),
+        "bgr": (0, 255, 255),
+    },
+    "blue": {
+        "lower": np.array([98, 179, 0]),
+        "upper": np.array([121, 255, 255]),
+        "bgr": (255, 0, 0),
+    },
+    "green": {
+        "lower": np.array([58, 73, 0]),
+        "upper": np.array([74, 255, 186]),
+        "bgr": (0, 255, 0),
+    },
+    "sky-blue": {
+        "lower": np.array([98, 0, 0]),
+        "upper": np.array([121, 190, 255]),
+        "bgr": (255, 255, 0),
+    },
+    "black": {
+        "lower": np.array([0, 0, 0]),
+        "upper": np.array([179, 255, 96]),
+        "bgr": (50, 50, 50),
+    },
+}
+
+
+# ── Ring HSV thresholds — black ring only ────────────────────────────────────
+
+RING_BAND_INNER = 0.7  # annulus inner fraction
+
+RING_HSV = {
+    "black": {
+        "lower": np.array([0, 0, 0]),
+        "upper": np.array([179, 255, 96]),
+        "bgr": (50, 50, 50),
+    },
+}
+
+MIN_BLOCK_RADIUS = 20
+
+
+# ── Data structures ──────────────────────────────────────────────────────────
+
+@dataclass
+class BlockInfo:
+    color: str
+    color_id: int
+    cx: int
+    cy: int
+    radius: int
+
+
+@dataclass
+class RingInfo:
+    color: str
+    color_id: int
+    cx: int
+    cy: int
+    radius: int
+
+
+@dataclass
+class TaskCode:
+    raw: str = ""
+    batch1_colors: list[int] = field(default_factory=list)
+    batch1_positions: list[int] = field(default_factory=list)
+    batch2_colors: list[int] = field(default_factory=list)
+    batch2_positions: list[int] = field(default_factory=list)
+    valid: bool = False
