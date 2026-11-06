@@ -104,6 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ring-param2", type=float, default=0.8,
                         help="HoughCircles param2 (circle perfectness, 0~1, default 0.8)")
 
+    parser.add_argument("--flip-h", action="store_true",
+                        help="Horizontally flip camera frame (for mirrored cameras)")
+    parser.add_argument("--flip-v", action="store_true",
+                        help="Vertically flip camera frame (for inverted mounting)")
+
     # Full-screen Status Display (Enabled by default)
     parser.add_argument("--no-display", action="store_true",
                         help="Disable full-screen task code & gripper status display (enabled by default)")
@@ -295,6 +300,14 @@ def main(argv: list[str] | None = None):
             time.sleep(0.005)
             continue
         consecutive_block_fails = 0
+
+        # Optional hardware frame flips
+        if args.flip_h and args.flip_v:
+            frame_block = cv2.flip(frame_block, -1)
+        elif args.flip_h:
+            frame_block = cv2.flip(frame_block, 1)
+        elif args.flip_v:
+            frame_block = cv2.flip(frame_block, 0)
 
         hsv = cv2.cvtColor(frame_block, cv2.COLOR_BGR2HSV)
         display_block = frame_block.copy()
