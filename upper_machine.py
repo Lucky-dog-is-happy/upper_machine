@@ -27,19 +27,12 @@ import numpy as np
 
 import struct
 
-# Add rcs_serial and rcs_ptl to path
-BASE_COMM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RCS_Robot_Upper", "src", "rcs_comm")
-for pkg in ["rcs_serial", "rcs_ptl"]:
-    p = os.path.join(BASE_COMM, pkg)
-    if os.path.exists(p) and p not in sys.path:
-        sys.path.insert(0, p)
-
 try:
-    from rcs_serial import SerialConfig, RdlcSerialLink
+    from upper_machine.comm import SerialConfig, RdlcSerialLink
     HAS_SERIAL = True
-except ImportError:
+except ImportError as exc:
     HAS_SERIAL = False
-    print("Warning: rcs_serial not found. Check RCS_Robot_Upper path.", file=sys.stderr)
+    print(f"Warning: Serial communication module unavailable: {exc}", file=sys.stderr)
 
 
 # ── Color config ──────────────────────────────────────────────────────────────

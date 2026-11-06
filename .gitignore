@@ -17,6 +17,7 @@ env/
 *.pdf
 
 # External references & hardware vendor libraries
+RCS_Robot_Upper/
 ROS应用/
 多主控通讯/
 YbImuLib/
