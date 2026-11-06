@@ -30,6 +30,7 @@ import time
 
 os.environ["QT_QPA_PLATFORM"] = "xcb"
 os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
 
 import cv2
 
@@ -352,18 +353,31 @@ def main(argv: list[str] | None = None):
             disp_frame = task_display.render_frame()
             cv2.imshow(WIN_DISPLAY, disp_frame)
 
-        # ── Serial send (rate-limited by send_interval) ─────────────────────
-        if sender and now - last_send_time >= args.send_interval:
-            # Broadcast task code while within timed window
-            if last_task_code.valid and now < qr_send_until:
-                sender.send_task_code(last_task_code)
+        # ── Periodic send or console log (rate-limited by send_interval) ────
+        if now - last_send_time >= args.send_interval:
+            if sender:
+                # Broadcast task code while within timed window
+                if last_task_code.valid and now < qr_send_until:
+                    sender.send_task_code(last_task_code)
 
-            if mode == MODE_RING:
-                if rings:
-                    sender.send_rings(rings)
+                if mode == MODE_RING:
+                    if rings:
+                        sender.send_rings(rings)
+                else:
+                    if blocks:
+                        sender.send_blocks(blocks)
             else:
-                if blocks:
-                    sender.send_blocks(blocks)
+                # No-serial mode: print live detections to terminal
+                if mode == MODE_RING and rings:
+                    desc_list = [
+                        f"Target #{r.digit_id}(conf={r.confidence:.2f})@({r.cx},{r.cy},r={r.radius})"
+                        if r.digit_id in (1, 2, 3) else f"Ring unknown@({r.cx},{r.cy},r={r.radius})"
+                        for r in rings
+                    ]
+                    print(f"[Vision RING] {len(rings)} ring(s): {', '.join(desc_list)}")
+                elif mode == MODE_BLOCK and blocks:
+                    desc_list = [f"{b.color}@({b.cx},{b.cy},r={b.radius})" for b in blocks]
+                    print(f"[Vision BLOCK] {len(blocks)} block(s): {', '.join(desc_list)}")
             last_send_time = now
 
         # ── Keyboard ─────────────────────────────────────────────────────────
@@ -375,11 +389,20 @@ def main(argv: list[str] | None = None):
             print(f"[key] Mode -> {'RING' if mode == MODE_RING else 'BLOCK'}")
         elif key == ord("p"):  # print current detections
             if mode == MODE_RING:
-                for r in rings:
-                    print(f"  ring [{r.color:9s}] center=({r.cx:4d},{r.cy:4d}) r={r.radius:3d}")
+                if rings:
+                    print(f"[Current Detections: {len(rings)} Ring(s)]")
+                    for r in rings:
+                        target_str = f"Target #{r.digit_id} (conf={r.confidence:.2f})" if r.digit_id in (1, 2, 3) else "unknown digit"
+                        print(f"  ring [{r.color:5s}] {target_str:25s} center=({r.cx:4d},{r.cy:4d}) r={r.radius:3d}")
+                else:
+                    print("  [Vision RING] No rings detected in current frame.")
             else:
-                for b in blocks:
-                    print(f"  block [{b.color:9s}] center=({b.cx:4d},{b.cy:4d}) r={b.radius:3d}")
+                if blocks:
+                    print(f"[Current Detections: {len(blocks)} Block(s)]")
+                    for b in blocks:
+                        print(f"  block [{b.color:9s}] center=({b.cx:4d},{b.cy:4d}) r={b.radius:3d}")
+                else:
+                    print("  [Vision BLOCK] No blocks detected in current frame.")
         elif key in (ord("1"), ord("+"), ord("=")):
             if task_display:
                 task_display.increment_pick(1)

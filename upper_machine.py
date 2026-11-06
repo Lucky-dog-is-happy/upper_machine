@@ -21,6 +21,7 @@ from queue import Empty
 
 os.environ["QT_QPA_PLATFORM"] = "xcb"
 os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
 
 import cv2
 import numpy as np
@@ -823,16 +824,28 @@ def main():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
         cv2.imshow(window_block, display_block)
 
-        # ── Serial send (task code + current mode result) ──
+        # ── Serial send or console log (task code + current mode result) ──
         now = time.time()
-        if sender and now - last_send_time >= args.send_interval:
-            if last_task_code.valid:
-                sender.send_task_code(last_task_code)
-            if mode == MODE_RING:
-                if rings:
-                    sender.send_rings(rings)
-            elif blocks:
-                sender.send_blocks(blocks)
+        if now - last_send_time >= args.send_interval:
+            if sender:
+                if last_task_code.valid:
+                    sender.send_task_code(last_task_code)
+                if mode == MODE_RING:
+                    if rings:
+                        sender.send_rings(rings)
+                elif blocks:
+                    sender.send_blocks(blocks)
+            else:
+                if mode == MODE_RING and rings:
+                    desc_list = [
+                        f"Target #{r.digit_id}(conf={r.confidence:.2f})@({r.cx},{r.cy},r={r.radius})"
+                        if r.digit_id in (1, 2, 3) else f"Ring unknown@({r.cx},{r.cy},r={r.radius})"
+                        for r in rings
+                    ]
+                    print(f"[Vision RING] {len(rings)} ring(s): {', '.join(desc_list)}")
+                elif mode == MODE_BLOCK and blocks:
+                    desc_list = [f"{b.color}@({b.cx},{b.cy},r={b.radius})" for b in blocks]
+                    print(f"[Vision BLOCK] {len(blocks)} block(s): {', '.join(desc_list)}")
             last_send_time = now
 
         key = cv2.waitKey(1) & 0xFF
@@ -843,11 +856,20 @@ def main():
             print(f"[key] Mode -> {'RING' if mode == MODE_RING else 'BLOCK'}")
         elif key == ord("p"):
             if mode == MODE_RING:
-                for r in rings:
-                    print(f"  ring [{r.color:9s}] center=({r.cx:4d}, {r.cy:4d})  r={r.radius:3d}")
+                if rings:
+                    print(f"[Current Detections: {len(rings)} Ring(s)]")
+                    for r in rings:
+                        target_str = f"Target #{r.digit_id} (conf={r.confidence:.2f})" if r.digit_id in (1, 2, 3) else "unknown digit"
+                        print(f"  ring [{r.color:5s}] {target_str:25s} center=({r.cx:4d}, {r.cy:4d})  r={r.radius:3d}")
+                else:
+                    print("  [Vision RING] No rings detected in current frame.")
             else:
-                for b in blocks:
-                    print(f"  [{b.color:9s}] center=({b.cx:4d}, {b.cy:4d})  r={b.radius:3d}")
+                if blocks:
+                    print(f"[Current Detections: {len(blocks)} Block(s)]")
+                    for b in blocks:
+                        print(f"  block [{b.color:9s}] center=({b.cx:4d}, {b.cy:4d})  r={b.radius:3d}")
+                else:
+                    print("  [Vision BLOCK] No blocks detected in current frame.")
 
     if sender:
         sender.close()
