@@ -18,38 +18,38 @@ import numpy as np
 COLORS = {
     "yellow": {
         "lower": np.array([15, 75, 70]),
-        "upper": np.array([35, 255, 255]),
+        "upper": np.array([40, 255, 255]),
         "bgr": (0, 255, 255),
     },
     "blue": {
-        "lower": np.array([98, 179, 0]),
-        "upper": np.array([121, 255, 255]),
+        "lower": np.array([95, 165, 50]),
+        "upper": np.array([125, 255, 255]),
         "bgr": (255, 0, 0),
     },
     "red": {
-        "lower": np.array([0, 166, 0]),
-        "upper": np.array([179, 203, 255]),
+        "lower": np.array([0, 70, 70]),
+        "upper": np.array([10, 255, 255]),
         "bgr": (0, 0, 255),
     },
     "green": {
-        "lower": np.array([58, 73, 0]),
-        "upper": np.array([74, 255, 186]),
+        "lower": np.array([41, 70, 50]),
+        "upper": np.array([85, 255, 255]),
         "bgr": (0, 255, 0),
     },
     "sky-blue": {
-        "lower": np.array([98, 0, 0]),
-        "upper": np.array([121, 190, 255]),
+        "lower": np.array([90, 45, 60]),
+        "upper": np.array([125, 160, 255]),
         "bgr": (255, 255, 0),
     },
     "black": {
         "lower": np.array([0, 0, 0]),
-        "upper": np.array([179, 255, 96]),
+        "upper": np.array([179, 110, 90]),
         "bgr": (50, 50, 50),
     },
 }
 
-RED_WRAP_LOWER = np.array([0, 166, 0])
-RED_WRAP_UPPER = np.array([179, 203, 255])
+RED_WRAP_LOWER = np.array([156, 70, 70])
+RED_WRAP_UPPER = np.array([180, 255, 255])
 
 
 def build_color_masks(hsv: np.ndarray) -> dict[str, np.ndarray]:

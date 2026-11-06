@@ -24,6 +24,7 @@ COLOR_NAME_TO_ID = {
 # ── Block HSV thresholds ─────────────────────────────────────────────────────
 
 COLOR_HSV = {
+    # 红色：双段保持优秀配置
     "red": {
         "lower": np.array([0, 70, 70]),
         "upper": np.array([10, 255, 255]),
@@ -34,29 +35,34 @@ COLOR_HSV = {
         "upper": np.array([180, 255, 255]),
         "bgr": (0, 0, 255),
     },
+    # 黄色：适当微调上限至 40，消除与绿色的过度断层
     "yellow": {
         "lower": np.array([15, 75, 70]),
-        "upper": np.array([35, 255, 255]),
+        "upper": np.array([40, 255, 255]),
         "bgr": (0, 255, 255),
     },
-    "blue": {
-        "lower": np.array([98, 179, 0]),
-        "upper": np.array([121, 255, 255]),
-        "bgr": (255, 0, 0),
-    },
+    # 绿色：下限延伸至 41 覆盖草绿，上限放宽至 85，Vmax 放宽至 255 解决高光穿孔
     "green": {
-        "lower": np.array([58, 73, 0]),
-        "upper": np.array([74, 255, 186]),
+        "lower": np.array([41, 70, 50]),
+        "upper": np.array([85, 255, 255]),
         "bgr": (0, 255, 0),
     },
+    # 浅蓝：提升 S 下限至 45 杜绝白地误检，S 上限设为 160 彻底与深蓝隔离
     "sky-blue": {
-        "lower": np.array([98, 0, 0]),
-        "upper": np.array([121, 190, 255]),
+        "lower": np.array([90, 45, 60]),
+        "upper": np.array([125, 160, 255]),
         "bgr": (255, 255, 0),
     },
+    # 深蓝：S 从 165 起步，与浅蓝产生 5 像素的安全隔离带
+    "blue": {
+        "lower": np.array([95, 165, 50]),
+        "upper": np.array([125, 255, 255]),
+        "bgr": (255, 0, 0),
+    },
+    # 黑色：限制 S 必须在 110 以下，防止把阴影下的暗色物料误判为黑
     "black": {
         "lower": np.array([0, 0, 0]),
-        "upper": np.array([179, 255, 96]),
+        "upper": np.array([179, 110, 90]),
         "bgr": (50, 50, 50),
     },
 }
