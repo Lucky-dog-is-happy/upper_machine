@@ -97,6 +97,11 @@ class SerialSender:
         payload = struct.pack("<BB", MSG_VISION, count) + block_data
         try:
             self.link.send(payload, dst=0x02, src=0x01)
+            desc = [f"#{b.color_id}@({b.cx},{b.cy})" for b in blocks[:count]]
+            if desc:
+                print(f"[TX] Blocks ({count}): {', '.join(desc)}")
+            else:
+                print(f"[TX] Blocks (0): none")
         except Exception as e:
             print(f"Send vision error: {e}", file=sys.stderr)
 
@@ -116,6 +121,8 @@ class SerialSender:
             self.link.send(payload, dst=0x02, src=0x01)
             if desc_list:
                 print(f"[TX] Rings ({count}): {', '.join(desc_list)}")
+            else:
+                print(f"[TX] Rings (0): none")
         except Exception as e:
             print(f"Send ring error: {e}", file=sys.stderr)
 

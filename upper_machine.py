@@ -533,6 +533,11 @@ class SerialSender:
         payload = struct.pack("<BB", MSG_VISION, count) + block_data
         try:
             self.link.send(payload, dst=0x02, src=0x01)
+            desc = [f"#{b.color_id}@({b.cx},{b.cy})" for b in blocks[:count]]
+            if desc:
+                print(f"[TX] Blocks ({count}): {', '.join(desc)}")
+            else:
+                print(f"[TX] Blocks (0): none")
         except Exception as e:
             print(f"Send vision error: {e}", file=sys.stderr)
 
@@ -551,6 +556,8 @@ class SerialSender:
             self.link.send(payload, dst=0x02, src=0x01)
             if desc_list:
                 print(f"[TX] Rings ({count}): {', '.join(desc_list)}")
+            else:
+                print(f"[TX] Rings (0): none")
         except Exception as e:
             print(f"Send ring error: {e}", file=sys.stderr)
 
@@ -848,22 +855,28 @@ def main():
             if sender:
                 if last_task_code.valid:
                     sender.send_task_code(last_task_code)
+                # Always send periodic detection status (count=0 acts as heartbeat/clear frame)
                 if mode == MODE_RING:
-                    if rings:
-                        sender.send_rings(rings)
-                elif blocks:
+                    sender.send_rings(rings)
+                else:
                     sender.send_blocks(blocks)
             else:
-                if mode == MODE_RING and rings:
-                    desc_list = [
-                        f"Target #{r.digit_id}(conf={r.confidence:.2f})@({r.cx},{r.cy},r={r.radius})"
-                        if r.digit_id in (1, 2, 3) else f"Ring unknown@({r.cx},{r.cy},r={r.radius})"
-                        for r in rings
-                    ]
-                    print(f"[Vision RING] {len(rings)} ring(s): {', '.join(desc_list)}")
-                elif mode == MODE_BLOCK and blocks:
-                    desc_list = [f"{b.color}@({b.cx},{b.cy},r={b.radius})" for b in blocks]
-                    print(f"[Vision BLOCK] {len(blocks)} block(s): {', '.join(desc_list)}")
+                if mode == MODE_RING:
+                    if rings:
+                        desc_list = [
+                            f"Target #{r.digit_id}(conf={r.confidence:.2f})@({r.cx},{r.cy},r={r.radius})"
+                            if r.digit_id in (1, 2, 3) else f"Ring unknown@({r.cx},{r.cy},r={r.radius})"
+                            for r in rings
+                        ]
+                        print(f"[Vision RING] {len(rings)} ring(s): {', '.join(desc_list)}")
+                    else:
+                        print(f"[Vision RING] 0 ring(s): none")
+                else:
+                    if blocks:
+                        desc_list = [f"{b.color}@({b.cx},{b.cy},r={b.radius})" for b in blocks]
+                        print(f"[Vision BLOCK] {len(blocks)} block(s): {', '.join(desc_list)}")
+                    else:
+                        print(f"[Vision BLOCK] 0 block(s): none")
             last_send_time = now
 
         key = cv2.waitKey(1) & 0xFF

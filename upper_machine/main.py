@@ -373,24 +373,29 @@ def main(argv: list[str] | None = None):
                 if last_task_code.valid and now < qr_send_until:
                     sender.send_task_code(last_task_code)
 
+                # Always send periodic detection status (count=0 acts as heartbeat/clear frame)
                 if mode == MODE_RING:
-                    if rings:
-                        sender.send_rings(rings)
+                    sender.send_rings(rings)
                 else:
-                    if blocks:
-                        sender.send_blocks(blocks)
+                    sender.send_blocks(blocks)
             else:
                 # No-serial mode: print live detections to terminal
-                if mode == MODE_RING and rings:
-                    desc_list = [
-                        f"Target #{r.digit_id}(conf={r.confidence:.2f})@({r.cx},{r.cy},r={r.radius})"
-                        if r.digit_id in (1, 2, 3) else f"Ring unknown@({r.cx},{r.cy},r={r.radius})"
-                        for r in rings
-                    ]
-                    print(f"[Vision RING] {len(rings)} ring(s): {', '.join(desc_list)}")
-                elif mode == MODE_BLOCK and blocks:
-                    desc_list = [f"{b.color}@({b.cx},{b.cy},r={b.radius})" for b in blocks]
-                    print(f"[Vision BLOCK] {len(blocks)} block(s): {', '.join(desc_list)}")
+                if mode == MODE_RING:
+                    if rings:
+                        desc_list = [
+                            f"Target #{r.digit_id}(conf={r.confidence:.2f})@({r.cx},{r.cy},r={r.radius})"
+                            if r.digit_id in (1, 2, 3) else f"Ring unknown@({r.cx},{r.cy},r={r.radius})"
+                            for r in rings
+                        ]
+                        print(f"[Vision RING] {len(rings)} ring(s): {', '.join(desc_list)}")
+                    else:
+                        print(f"[Vision RING] 0 ring(s): none")
+                else:
+                    if blocks:
+                        desc_list = [f"{b.color}@({b.cx},{b.cy},r={b.radius})" for b in blocks]
+                        print(f"[Vision BLOCK] {len(blocks)} block(s): {', '.join(desc_list)}")
+                    else:
+                        print(f"[Vision BLOCK] 0 block(s): none")
             last_send_time = now
 
         # ── Keyboard ─────────────────────────────────────────────────────────
