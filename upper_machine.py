@@ -261,11 +261,13 @@ def parse_task_code(text: str) -> TaskCode:
 
 # ── Color detection ───────────────────────────────────────────────────────────
 
-def get_mask(hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray) -> np.ndarray:
+def get_mask(hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray,
+             kernel_size: tuple[int, int] = (5, 5)) -> np.ndarray:
     mask = cv2.inRange(hsv, lower, upper)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    if kernel_size[0] > 1 and kernel_size[1] > 1:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
     return mask
 
 
@@ -358,7 +360,7 @@ def dedup_concentric_circles(circles: list[tuple[int, int, int]],
 
 def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
-                 param2: float = 0.9) -> list[RingInfo]:
+                 param2: float = 0.8) -> list[RingInfo]:
     """Detect ground color rings and classify each ring's color.
 
     Runs Hough circles on the gray frame, drops concentric duplicates keeping
@@ -368,7 +370,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
     circles = cv2.HoughCircles(
-        gauss, cv2.HOUGH_GRADIENT_ALT, 0.5, minDist=100,
+        gauss, cv2.HOUGH_GRADIENT_ALT, 1.2, minDist=max(30, min_radius),
         param1=100, param2=param2,
         minRadius=min_radius, maxRadius=max_radius,
     )
@@ -382,9 +384,9 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     for name, cfg in RING_HSV.items():
         if name == "red2":
             continue
-        mask = get_mask(hsv, cfg["lower"], cfg["upper"])
+        mask = get_mask(hsv, cfg["lower"], cfg["upper"], kernel_size=(3, 3))
         if name == "red":
-            mask2 = get_mask(hsv, RING_HSV["red2"]["lower"], RING_HSV["red2"]["upper"])
+            mask2 = get_mask(hsv, RING_HSV["red2"]["lower"], RING_HSV["red2"]["upper"], kernel_size=(3, 3))
             mask = cv2.bitwise_or(mask, mask2)
         masks[name] = mask
 
@@ -407,7 +409,10 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
             area = int(cv2.countNonZero(cv2.bitwise_and(mask[y1:y2, x1:x2], band_roi)))
             if area > best_area:
                 best_area, best_name = area, name
-        if best_name is None or best_area < min_color_area:
+
+        adaptive_threshold = max(30, int(2 * np.pi * r * 0.35))
+        effective_min_area = min(min_color_area, adaptive_threshold)
+        if best_name is None or best_area < effective_min_area:
             continue
         rings.append(RingInfo(
             color=best_name, color_id=COLOR_NAME_TO_ID.get(best_name, 0),
@@ -608,10 +613,10 @@ def main():
                         help="Min bounding rect aspect ratio (0.0~1.0)")
     parser.add_argument("--ring-min-radius", type=int, default=20, help="Min ring radius (px)")
     parser.add_argument("--ring-max-radius", type=int, default=200, help="Max ring radius (px)")
-    parser.add_argument("--ring-min-area", type=int, default=500,
-                        help="Min ring color area (px) to accept a ring")
-    parser.add_argument("--ring-param2", type=float, default=0.9,
-                        help="HoughCircles param2 (circle perfectness) for ring detection")
+    parser.add_argument("--ring-min-area", type=int, default=100,
+                        help="Min ring color area (px) to accept a ring (default 100, adaptive for small rings)")
+    parser.add_argument("--ring-param2", type=float, default=0.8,
+                        help="HoughCircles param2 (circle perfectness, default 0.8) for ring detection")
     args = parser.parse_args()
 
     if args.list_ports:

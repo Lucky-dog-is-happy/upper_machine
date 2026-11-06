@@ -96,10 +96,10 @@ def build_parser() -> argparse.ArgumentParser:
     # Black Ring detection params
     parser.add_argument("--ring-min-radius", type=int, default=20)
     parser.add_argument("--ring-max-radius", type=int, default=200)
-    parser.add_argument("--ring-min-area", type=int, default=500,
-                        help="Min black pixel count inside ring annulus")
-    parser.add_argument("--ring-param2", type=float, default=0.9,
-                        help="HoughCircles param2 (circle perfectness, 0~1)")
+    parser.add_argument("--ring-min-area", type=int, default=100,
+                        help="Min black pixel count inside ring annulus (default 100, adaptive for small rings)")
+    parser.add_argument("--ring-param2", type=float, default=0.8,
+                        help="HoughCircles param2 (circle perfectness, 0~1, default 0.8)")
 
     # Full-screen Status Display (Enabled by default)
     parser.add_argument("--no-display", action="store_true",

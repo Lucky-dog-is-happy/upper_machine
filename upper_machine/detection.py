@@ -9,12 +9,14 @@ from .config import (
 )
 
 
-def get_mask(hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray) -> np.ndarray:
+def get_mask(hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray,
+             kernel_size: tuple[int, int] = (5, 5)) -> np.ndarray:
     """Create a cleaned binary mask from HSV range."""
     mask = cv2.inRange(hsv, lower, upper)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    if kernel_size[0] > 1 and kernel_size[1] > 1:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
     return mask
 
 
@@ -105,7 +107,7 @@ def dedup_concentric_circles(circles: list[tuple[int, int, int]],
 
 def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
-                 param2: float = 0.9) -> list[RingInfo]:
+                 param2: float = 0.8) -> list[RingInfo]:
     """Detect black circular rings on the ground.
 
     Runs HoughCircles on grayscale frame, dedups concentric circles,
@@ -114,7 +116,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
     circles = cv2.HoughCircles(
-        gauss, cv2.HOUGH_GRADIENT_ALT, 0.5, minDist=100,
+        gauss, cv2.HOUGH_GRADIENT_ALT, 1.2, minDist=max(30, min_radius),
         param1=100, param2=param2,
         minRadius=min_radius, maxRadius=max_radius,
     )
@@ -124,9 +126,9 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     circles = np.round(circles.reshape((-1, 3))).astype(int)
     circles = dedup_concentric_circles([(int(c[0]), int(c[1]), int(c[2])) for c in circles])
 
-    # Direct black mask for ring verification
+    # Direct black mask for ring verification (use gentler (3,3) kernel to protect thin lines)
     black_cfg = RING_HSV["black"]
-    black_mask = get_mask(hsv, black_cfg["lower"], black_cfg["upper"])
+    black_mask = get_mask(hsv, black_cfg["lower"], black_cfg["upper"], kernel_size=(3, 3))
 
     h, w = gray.shape
     rings = []
@@ -143,7 +145,12 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
         band_roi = band[y1:y2, x1:x2]
 
         black_area = int(cv2.countNonZero(cv2.bitwise_and(black_mask[y1:y2, x1:x2], band_roi)))
-        if black_area < min_color_area:
+
+        # Adaptive area requirement: thin ring lines scale with circumference (~2*pi*r).
+        # Capped by min_color_area so small circles (r < 90) are not unfairly dropped.
+        adaptive_threshold = max(30, int(2 * np.pi * r * 0.35))
+        effective_min_area = min(min_color_area, adaptive_threshold)
+        if black_area < effective_min_area:
             continue
 
         rings.append(RingInfo(
