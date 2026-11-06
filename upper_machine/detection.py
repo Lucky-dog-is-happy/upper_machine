@@ -124,7 +124,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
     circles = cv2.HoughCircles(
-        gauss, cv2.HOUGH_GRADIENT_ALT, 1.2, minDist=max(30, min_radius),
+        gauss, cv2.HOUGH_GRADIENT_ALT, 1.2, minDist=max(50, int(min_radius * 0.8)),
         param1=100, param2=param2,
         minRadius=min_radius, maxRadius=max_radius,
     )

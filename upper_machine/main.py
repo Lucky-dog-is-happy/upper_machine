@@ -95,7 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--block-min-aspect", type=float, default=0.65)
 
     # Black Ring detection params
-    parser.add_argument("--ring-min-radius", type=int, default=20)
+    parser.add_argument("--ring-min-radius", type=int, default=60,
+                        help="Min ring radius (px, default 60)")
     parser.add_argument("--ring-max-radius", type=int, default=200)
     parser.add_argument("--ring-min-area", type=int, default=100,
                         help="Min black pixel count inside ring annulus (default 100, adaptive for small rings)")

@@ -377,7 +377,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
     circles = cv2.HoughCircles(
-        gauss, cv2.HOUGH_GRADIENT_ALT, 1.2, minDist=max(30, min_radius),
+        gauss, cv2.HOUGH_GRADIENT_ALT, 1.2, minDist=max(50, int(min_radius * 0.8)),
         param1=100, param2=param2,
         minRadius=min_radius, maxRadius=max_radius,
     )
@@ -652,7 +652,7 @@ def main():
                         help="Min fill ratio area/(pi*r^2) (0.0~1.0)")
     parser.add_argument("--block-min-aspect", type=float, default=0.65,
                         help="Min bounding rect aspect ratio (0.0~1.0)")
-    parser.add_argument("--ring-min-radius", type=int, default=20, help="Min ring radius (px)")
+    parser.add_argument("--ring-min-radius", type=int, default=60, help="Min ring radius (px, default 60)")
     parser.add_argument("--ring-max-radius", type=int, default=200, help="Max ring radius (px)")
     parser.add_argument("--ring-min-area", type=int, default=100,
                         help="Min ring color area (px) to accept a ring (default 100, adaptive for small rings)")
