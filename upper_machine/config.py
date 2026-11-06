@@ -91,10 +91,12 @@ class BlockInfo:
 @dataclass
 class RingInfo:
     color: str
-    color_id: int
+    color_id: int          # target_id: 1, 2, 3 (digit) or 5 (black ring unknown)
     cx: int
     cy: int
     radius: int
+    digit_id: int = 5      # 1, 2, 3 (digit) or 5 (black ring without digit)
+    confidence: float = 1.0
 
 
 @dataclass

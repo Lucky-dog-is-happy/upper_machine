@@ -7,6 +7,9 @@ from .config import (
     COLOR_HSV, COLOR_NAME_TO_ID, RING_HSV, RING_BAND_INNER,
     BlockInfo, RingInfo,
 )
+from .digit import (
+    DigitClassifier, extract_digit_scores_from_ring, match_rings_to_digits,
+)
 
 
 def get_mask(hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray,
@@ -107,11 +110,16 @@ def dedup_concentric_circles(circles: list[tuple[int, int, int]],
 
 def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
-                 param2: float = 0.8) -> list[RingInfo]:
-    """Detect black circular rings on the ground.
+                 param2: float = 0.8,
+                 digit_classifier: DigitClassifier | None = None,
+                 max_rings: int = 3) -> list[RingInfo]:
+    """Detect black circular rings on the ground and classify inner digits (1, 2, 3).
 
-    Runs HoughCircles on grayscale frame, dedups concentric circles,
-    and checks if the ring annulus contains sufficient black pixels.
+    Pipeline:
+      1. Detect black circular rings using HoughCircles ALT + black annulus verification.
+      2. Keep up to max_rings valid ring candidates (sorted by detected radius/area).
+      3. For each ring candidate, inspect the inner core region for digits 1, 2, 3.
+      4. Globally match digits 1, 2, 3 to rings without conflicts (each digit unique).
     """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -131,7 +139,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     black_mask = get_mask(hsv, black_cfg["lower"], black_cfg["upper"], kernel_size=(3, 3))
 
     h, w = gray.shape
-    rings = []
+    candidates: list[tuple[int, int, int, int]] = []  # (cx, cy, r, black_area)
     for cx, cy, r in circles:
         x1, y1 = max(0, cx - r), max(0, cy - r)
         x2, y2 = min(w, cx + r), min(h, cy + r)
@@ -153,12 +161,40 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
         if black_area < effective_min_area:
             continue
 
+        candidates.append((int(cx), int(cy), int(r), black_area))
+
+    if not candidates:
+        return []
+
+    # Sort candidates by radius (or black area) and keep up to max_rings
+    candidates.sort(key=lambda c: c[2], reverse=True)
+    selected = candidates[:max_rings]
+
+    # Inspect inner core for digits 1, 2, 3 if classifier provided
+    if digit_classifier is not None:
+        scores_list = [
+            extract_digit_scores_from_ring(frame, cx, cy, r, digit_classifier)
+            for cx, cy, r, _ in selected
+        ]
+        assigned_ids = match_rings_to_digits(scores_list, min_confidence=0.45)
+    else:
+        assigned_ids = [5] * len(selected)
+
+    rings = []
+    for idx, (cx, cy, r, _) in enumerate(selected):
+        target_id = assigned_ids[idx]
+        conf = 1.0
+        if digit_classifier is not None and target_id in (1, 2, 3):
+            conf = scores_list[idx].get(target_id, 1.0)
+
         rings.append(RingInfo(
             color="black",
-            color_id=COLOR_NAME_TO_ID.get("black", 5),
-            cx=int(cx),
-            cy=int(cy),
-            radius=int(r),
+            color_id=target_id,  # 1, 2, 3 for digit, 5 for unknown black ring
+            cx=cx,
+            cy=cy,
+            radius=r,
+            digit_id=target_id,
+            confidence=conf,
         ))
 
     return rings

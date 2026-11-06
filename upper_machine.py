@@ -34,6 +34,14 @@ except ImportError as exc:
     HAS_SERIAL = False
     print(f"Warning: Serial communication module unavailable: {exc}", file=sys.stderr)
 
+try:
+    from upper_machine.digit import (
+        DigitClassifier, extract_digit_scores_from_ring, match_rings_to_digits,
+    )
+    HAS_DIGIT_CLASSIFIER = True
+except ImportError:
+    HAS_DIGIT_CLASSIFIER = False
+
 
 # ── Color config ──────────────────────────────────────────────────────────────
 
@@ -149,10 +157,12 @@ class BlockInfo:
 @dataclass
 class RingInfo:
     color: str
-    color_id: int
+    color_id: int          # target_id: 1, 2, 3 (digit) or 5 (black ring unknown)
     cx: int
     cy: int
     radius: int
+    digit_id: int = 5      # 1, 2, 3 (digit) or 5 (black ring without digit)
+    confidence: float = 1.0
 
 
 @dataclass
@@ -360,13 +370,10 @@ def dedup_concentric_circles(circles: list[tuple[int, int, int]],
 
 def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
-                 param2: float = 0.8) -> list[RingInfo]:
-    """Detect ground color rings and classify each ring's color.
-
-    Runs Hough circles on the gray frame, drops concentric duplicates keeping
-    the largest radius, then selects the dominant ring color inside an annulus
-    band (so the surrounding/inner background does not dominate the vote).
-    """
+                 param2: float = 0.8,
+                 digit_classifier: "DigitClassifier | None" = None,
+                 max_rings: int = 3) -> list[RingInfo]:
+    """Detect ground black circular rings and classify inner digits 1, 2, 3."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
     circles = cv2.HoughCircles(
@@ -380,43 +387,61 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     circles = np.round(circles.reshape((-1, 3))).astype(int)
     circles = dedup_concentric_circles([(int(c[0]), int(c[1]), int(c[2])) for c in circles])
 
-    masks = {}
-    for name, cfg in RING_HSV.items():
-        if name == "red2":
-            continue
-        mask = get_mask(hsv, cfg["lower"], cfg["upper"], kernel_size=(3, 3))
-        if name == "red":
-            mask2 = get_mask(hsv, RING_HSV["red2"]["lower"], RING_HSV["red2"]["upper"], kernel_size=(3, 3))
-            mask = cv2.bitwise_or(mask, mask2)
-        masks[name] = mask
+    # Direct black mask for ring verification
+    black_cfg = RING_HSV["black"]
+    black_mask = get_mask(hsv, black_cfg["lower"], black_cfg["upper"], kernel_size=(3, 3))
 
     h, w = gray.shape
-    rings = []
+    candidates: list[tuple[int, int, int, int]] = []
     for cx, cy, r in circles:
         x1, y1 = max(0, cx - r), max(0, cy - r)
         x2, y2 = min(w, cx + r), min(h, cy + r)
         if x2 <= x1 or y2 <= y1:
             continue
 
-        # Annulus band around the detected radius, so only the ring itself is voted on.
         band = np.zeros(gray.shape, np.uint8)
         cv2.circle(band, (cx, cy), r, 255, -1)
         cv2.circle(band, (cx, cy), max(1, int(r * RING_BAND_INNER)), 0, -1)
         band_roi = band[y1:y2, x1:x2]
 
-        best_name, best_area = None, 0
-        for name, mask in masks.items():
-            area = int(cv2.countNonZero(cv2.bitwise_and(mask[y1:y2, x1:x2], band_roi)))
-            if area > best_area:
-                best_area, best_name = area, name
+        black_area = int(cv2.countNonZero(cv2.bitwise_and(black_mask[y1:y2, x1:x2], band_roi)))
 
         adaptive_threshold = max(30, int(2 * np.pi * r * 0.35))
         effective_min_area = min(min_color_area, adaptive_threshold)
-        if best_name is None or best_area < effective_min_area:
+        if black_area < effective_min_area:
             continue
+
+        candidates.append((int(cx), int(cy), int(r), black_area))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda c: c[2], reverse=True)
+    selected = candidates[:max_rings]
+
+    if digit_classifier is not None and HAS_DIGIT_CLASSIFIER:
+        scores_list = [
+            extract_digit_scores_from_ring(frame, cx, cy, r, digit_classifier)
+            for cx, cy, r, _ in selected
+        ]
+        assigned_ids = match_rings_to_digits(scores_list, min_confidence=0.45)
+    else:
+        assigned_ids = [5] * len(selected)
+
+    rings = []
+    for idx, (cx, cy, r, _) in enumerate(selected):
+        target_id = assigned_ids[idx]
+        conf = 1.0
+        if digit_classifier is not None and HAS_DIGIT_CLASSIFIER and target_id in (1, 2, 3):
+            conf = scores_list[idx].get(target_id, 1.0)
         rings.append(RingInfo(
-            color=best_name, color_id=COLOR_NAME_TO_ID.get(best_name, 0),
-            cx=int(cx), cy=int(cy), radius=int(r),
+            color="black",
+            color_id=target_id,
+            cx=cx,
+            cy=cy,
+            radius=r,
+            digit_id=target_id,
+            confidence=conf,
         ))
     return rings
 
@@ -508,12 +533,17 @@ class SerialSender:
         # Same layout as MSG_VISION, only the msg_id differs (MSG_RING)
         count = min(len(rings), 3)
         ring_data = b""
+        desc_list = []
         for r in rings[:count]:
-            ring_data += struct.pack("<Bfff", r.color_id,
+            target_id = getattr(r, "digit_id", r.color_id)
+            ring_data += struct.pack("<Bfff", target_id,
                                      float(r.cx), float(r.cy), float(r.radius))
+            desc_list.append(f"#{target_id}@({r.cx},{r.cy})")
         payload = struct.pack("<BB", MSG_RING, count) + ring_data
         try:
             self.link.send(payload, dst=0x02, src=0x01)
+            if desc_list:
+                print(f"[TX] Rings ({count}): {', '.join(desc_list)}")
         except Exception as e:
             print(f"Send ring error: {e}", file=sys.stderr)
 
@@ -554,13 +584,24 @@ def draw_blocks(display: np.ndarray, blocks: list[BlockInfo]):
 
 def draw_rings(display: np.ndarray, rings: list[RingInfo]):
     for r in rings:
-        cfg = RING_HSV.get(r.color, RING_HSV["red"])
-        bgr = cfg["bgr"]
-        cv2.circle(display, (r.cx, r.cy), r.radius, bgr, 3)
-        cv2.circle(display, (r.cx, r.cy), 4, bgr, -1)
-        label = f"ring {r.color} ({r.cx},{r.cy}) r={r.radius}"
-        cv2.putText(display, label, (r.cx - r.radius, r.cy - r.radius - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, bgr, 1)
+        digit = getattr(r, "digit_id", 5)
+        conf = getattr(r, "confidence", 1.0)
+        if digit in (1, 2, 3):
+            outline_color = (0, 255, 0)
+            label = f"Target #{digit} ({r.cx},{r.cy}) r={r.radius} [{conf:.2f}]"
+            center_text = str(digit)
+        else:
+            outline_color = (0, 255, 255)
+            label = f"Ring (unknown) ({r.cx},{r.cy}) r={r.radius}"
+            center_text = "?"
+
+        cv2.circle(display, (r.cx, r.cy), r.radius, outline_color, 2)
+        cv2.circle(display, (r.cx, r.cy), max(1, int(r.radius * 0.65)), (100, 100, 100), 1)
+        cv2.circle(display, (r.cx, r.cy), 4, (0, 0, 255), -1)
+        cv2.putText(display, label, (r.cx - r.radius, max(15, r.cy - r.radius - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, outline_color, 1)
+        cv2.putText(display, center_text, (r.cx - 6, r.cy + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
 
 def draw_task_code(display: np.ndarray, tc: TaskCode):
@@ -632,6 +673,7 @@ def main():
             print("  (none)")
         return
 
+    digit_classifier = DigitClassifier() if HAS_DIGIT_CLASSIFIER else None
     qr_detector = None
     cam_qr = None
     qr_active = False
@@ -746,9 +788,13 @@ def main():
         if mode == MODE_RING:
             rings = detect_rings(frame_block, hsv, args.ring_min_radius,
                                  args.ring_max_radius, args.ring_min_area,
-                                 args.ring_param2)
+                                 args.ring_param2,
+                                 digit_classifier=digit_classifier if HAS_DIGIT_CLASSIFIER else None,
+                                 max_rings=3)
             draw_rings(display_block, rings)
-            status = f"Mode: RING | Rings: {len(rings)}"
+            target_ids = [str(r.digit_id) if r.digit_id in (1, 2, 3) else "?" for r in rings]
+            ring_desc = f" [{', '.join(target_ids)}]" if target_ids else ""
+            status = f"Mode: RING (black){ring_desc} | Rings: {len(rings)}"
         else:
             blocks = detect_blocks(
                 hsv,

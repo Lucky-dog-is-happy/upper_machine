@@ -36,6 +36,7 @@ import cv2
 from .camera import ThreadedCamera
 from .config import TaskCode
 from .detection import detect_blocks, detect_rings
+from .digit import DigitClassifier
 from .display import draw_blocks, draw_rings, draw_task_code, draw_status
 from .qr_code import init_qr_detector, parse_task_code
 from .serial_comm import (
@@ -172,6 +173,9 @@ def main(argv: list[str] | None = None):
     else:
         print("Serial disabled.")
 
+    # ── Digit classifier for ring-digit association ─────────────────────────
+    digit_classifier = DigitClassifier()
+
     # ── Windows & Display Setup ──────────────────────────────────────────────
     WIN_QR = "QR Camera (ESC=quit, m=toggle mode)"
     WIN_BLOCK = "Block/Ring Camera (ESC=quit, m=toggle mode, p=print)"
@@ -302,9 +306,13 @@ def main(argv: list[str] | None = None):
                 max_radius=args.ring_max_radius,
                 min_color_area=args.ring_min_area,
                 param2=args.ring_param2,
+                digit_classifier=digit_classifier,
+                max_rings=3,
             )
             draw_rings(display_block, rings)
-            status = f"Mode: RING (black) | Rings: {len(rings)}"
+            target_ids = [str(r.digit_id) if r.digit_id in (1, 2, 3) else "?" for r in rings]
+            ring_desc = f" [{', '.join(target_ids)}]" if target_ids else ""
+            status = f"Mode: RING (black){ring_desc} | Rings: {len(rings)}"
         else:
             blocks = detect_blocks(
                 hsv,

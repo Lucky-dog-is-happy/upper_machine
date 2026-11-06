@@ -19,13 +19,32 @@ def draw_blocks(display: np.ndarray, blocks: list[BlockInfo]) -> None:
 
 def draw_rings(display: np.ndarray, rings: list[RingInfo]) -> None:
     for r in rings:
-        cfg = RING_HSV.get(r.color, {"bgr": (50, 50, 50)})
-        bgr = cfg.get("bgr", (50, 50, 50))
-        cv2.circle(display, (r.cx, r.cy), r.radius, (0, 255, 255), 2)  # distinct outline
-        cv2.circle(display, (r.cx, r.cy), 4, bgr, -1)
-        label = f"black ring ({r.cx},{r.cy}) r={r.radius}"
-        cv2.putText(display, label, (r.cx - r.radius, r.cy - r.radius - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        digit = getattr(r, "digit_id", 5)
+        conf = getattr(r, "confidence", 1.0)
+
+        if digit in (1, 2, 3):
+            outline_color = (0, 255, 0)   # Green outline for confirmed target
+            label = f"Target #{digit} ({r.cx},{r.cy}) r={r.radius} [{conf:.2f}]"
+            center_text = str(digit)
+        else:
+            outline_color = (0, 255, 255) # Yellow outline for unknown digit ring
+            label = f"Ring (unknown) ({r.cx},{r.cy}) r={r.radius}"
+            center_text = "?"
+
+        # Outer circle outline
+        cv2.circle(display, (r.cx, r.cy), r.radius, outline_color, 2)
+        # Inner search core boundary
+        cv2.circle(display, (r.cx, r.cy), max(1, int(r.radius * 0.65)), (100, 100, 100), 1)
+        # Center dot
+        cv2.circle(display, (r.cx, r.cy), 4, (0, 0, 255), -1)
+
+        # Label above ring
+        cv2.putText(display, label, (r.cx - r.radius, max(15, r.cy - r.radius - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, outline_color, 1)
+
+        # Center digit label
+        cv2.putText(display, center_text, (r.cx - 6, r.cy + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
 
 def draw_task_code(display: np.ndarray, tc: TaskCode) -> None:

@@ -105,12 +105,17 @@ class SerialSender:
             return
         count = min(len(rings), 3)
         ring_data = b""
+        desc_list = []
         for r in rings[:count]:
-            ring_data += struct.pack("<Bfff", r.color_id,
+            target_id = getattr(r, "digit_id", r.color_id)
+            ring_data += struct.pack("<Bfff", target_id,
                                      float(r.cx), float(r.cy), float(r.radius))
+            desc_list.append(f"#{target_id}@({r.cx},{r.cy})")
         payload = struct.pack("<BB", MSG_RING, count) + ring_data
         try:
             self.link.send(payload, dst=0x02, src=0x01)
+            if desc_list:
+                print(f"[TX] Rings ({count}): {', '.join(desc_list)}")
         except Exception as e:
             print(f"Send ring error: {e}", file=sys.stderr)
 
