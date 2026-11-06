@@ -144,28 +144,28 @@ class DigitClassifier:
         # 3. Fuse Template and Geometry
         scores = {1: tpl_s[1] * 0.5, 2: tpl_s[2] * 0.5, 3: tpl_s[3] * 0.5}
 
-        # Rules for 1 (Slender vertical body)
-        if aspect >= 1.75:
+        # Rules for 1 (Slender vertical body, aspect ratio >= 2.05 in real images)
+        if aspect >= 2.05:
             scores[1] += 0.50
-            scores[2] -= 0.30
-            scores[3] -= 0.30
+            scores[2] -= 0.35
+            scores[3] -= 0.35
         elif aspect < 1.30:
             scores[1] -= 0.40
 
         # Rules for 2 vs 3 (Lower-mid centroid is the ground-truth discriminator):
         # Digit 2: cg_x <= 0.40 (diagonal stroke occupies the left half)
         # Digit 3: cg_x >= 0.60 (lower circle hollow leaves the left half empty, black is on the right)
-        if cg_x <= 0.40 and aspect < 1.75:
+        if cg_x <= 0.40 and aspect < 2.05:
             scores[2] += 0.50
             scores[3] -= 0.35
-        elif cg_x >= 0.60 and aspect < 1.75:
+        elif cg_x >= 0.60 and aspect < 2.05:
             scores[3] += 0.50
             scores[2] -= 0.35
         else:
             # Transition zone: check mid waist beam
-            if mid_span >= 0.45 and aspect < 1.75:
+            if mid_span >= 0.45 and aspect < 2.05:
                 scores[3] += 0.30
-            elif aspect < 1.75:
+            elif aspect < 2.05:
                 scores[2] += 0.30
 
         return {d: max(0.0, min(1.0, float(s))) for d, s in scores.items()}
