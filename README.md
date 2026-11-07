@@ -138,7 +138,11 @@ uv run python run_upper.py --list-ports
    ```bash
    uv run python digit_detector.py --camera 0
    ```
-3. **单文件版上位机运行入口**（供备用）：
+3. **交互式摄像头拍照采集工具**：
+   ```bash
+   uv run python capture_photo.py --camera 2 --prefix digits
+   ```
+4. **单文件版上位机运行入口**（供备用）：
    ```bash
    uv run python upper_machine.py
    ```
