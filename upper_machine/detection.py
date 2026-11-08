@@ -112,7 +112,8 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
                  param2: float = 0.72,
                  digit_classifier: DigitClassifier | None = None,
-                 max_rings: int = 3) -> list[RingInfo]:
+                 max_rings: int = 3,
+                 digit_min_conf: float = 0.65) -> list[RingInfo]:
     """Detect black circular rings on the ground and classify inner digits (1, 2, 3).
 
     Pipeline:
@@ -176,7 +177,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
             extract_digit_scores_from_ring(frame, cx, cy, r, digit_classifier)
             for cx, cy, r, _ in selected
         ]
-        assigned_ids = match_rings_to_digits(scores_list, min_confidence=0.35)
+        assigned_ids = match_rings_to_digits(scores_list, min_confidence=digit_min_conf)
     else:
         assigned_ids = [5] * len(selected)
 

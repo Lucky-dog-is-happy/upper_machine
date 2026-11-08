@@ -169,7 +169,8 @@ uv run python run_upper.py --list-ports
 | `--ring-min-radius` | `60` | int | 黑色圆环最小检测半径（px，滤除细小螺丝孔/杂点） |
 | `--ring-max-radius` | `200` | int | 黑色圆环最大检测半径（px） |
 | `--ring-min-area` | `100` | int | 环带内有效黑像素基准阈值（代码内自动支持周长自适应） |
-| `--ring-param2` | `0.8` | float | 霍夫圆变换圆度/完美度阈值（HOUGH_GRADIENT_ALT，0.0~1.0） |
+| `--ring-param2` | `0.72` | float | 霍夫圆变换圆度/完美度阈值（HOUGH_GRADIENT_ALT，0.0~1.0） |
+| `--digit-min-conf` | `0.65` | float | 环内数字识别置信度底线门槛（低于该值自动保底上报为 5，防止误判） |
 | `--no-display` | `False` | bool | 关闭全屏任务码与机械臂抓取/放置监控屏 |
 | `--no-fullscreen` | `False` | bool | 将监控屏以 1280×720 窗口化模式运行 |
 

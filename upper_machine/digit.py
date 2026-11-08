@@ -16,6 +16,7 @@ Features:
 
 import os
 from dataclasses import dataclass
+
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -46,8 +47,24 @@ def _render_digit_with_cv2(digit: int, size: int = 80) -> np.ndarray:
     return img
 
 
+def make_square_aspect_preserved(crop: np.ndarray, target_size: int = NORM_SIZE, max_inner: int = 26) -> np.ndarray:
+    """Resize binary crop while strictly preserving aspect ratio, preventing slender digits from squashing."""
+    h, w = crop.shape[:2]
+    if h == 0 or w == 0:
+        return np.zeros((target_size, target_size), dtype=np.uint8)
+    scale = max_inner / float(max(h, w))
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    resized = cv2.resize(crop, (nw, nh), interpolation=cv2.INTER_NEAREST)
+    canvas = np.zeros((target_size, target_size), dtype=np.uint8)
+    x_offset = (target_size - nw) // 2
+    y_offset = (target_size - nh) // 2
+    canvas[y_offset:y_offset + nh, x_offset:x_offset + nw] = resized
+    return canvas
+
+
 def create_digit_templates(size: int = NORM_SIZE) -> dict[int, list[np.ndarray]]:
-    """Generate normalized multi-font templates for 1, 2, 3."""
+    """Generate normalized multi-font templates for 1, 2, 3 with aspect ratio preservation."""
     templates: dict[int, list[np.ndarray]] = {1: [], 2: [], 3: []}
 
     font_candidates = [
@@ -73,9 +90,7 @@ def create_digit_templates(size: int = NORM_SIZE) -> dict[int, list[np.ndarray]]
                     c = max(cnts, key=cv2.contourArea)
                     bx, by, cbw, cbh = cv2.boundingRect(c)
                     cropped = arr[by:by + cbh, bx:bx + cbw]
-                    pad = max(2, int(max(cbw, cbh) * 0.1))
-                    padded = cv2.copyMakeBorder(cropped, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
-                    templates[digit].append(cv2.resize(padded, (size, size)))
+                    templates[digit].append(make_square_aspect_preserved(cropped, target_size=size, max_inner=26))
             except Exception:
                 pass
 
@@ -88,11 +103,7 @@ def create_digit_templates(size: int = NORM_SIZE) -> dict[int, list[np.ndarray]]
                 c = max(cnts, key=cv2.contourArea)
                 bx, by, cbw, cbh = cv2.boundingRect(c)
                 cropped = canvas[by:by + cbh, bx:bx + cbw]
-                pad = max(2, int(max(cbw, cbh) * 0.1))
-                templates[digit].append(cv2.resize(
-                    cv2.copyMakeBorder(cropped, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0),
-                    (size, size),
-                ))
+                templates[digit].append(make_square_aspect_preserved(cropped, target_size=size, max_inner=26))
 
     return templates
 
@@ -111,9 +122,8 @@ class DigitClassifier:
 
         aspect = th / float(tw)
 
-        # 1. Multi-font normalized template matching correlation
-        pad = max(2, int(max(th, tw) * 0.1))
-        norm = cv2.resize(cv2.copyMakeBorder(t, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0), (NORM_SIZE, NORM_SIZE))
+        # 1. Multi-font aspect-preserved template matching correlation
+        norm = make_square_aspect_preserved(t, target_size=NORM_SIZE, max_inner=26)
 
         tpl_s = {}
         for d in [1, 2, 3]:
@@ -123,14 +133,14 @@ class DigitClassifier:
                 s = max(s, float(res[0][0]))
             tpl_s[d] = max(0.0, s)
 
-        # 2. Soft Aspect Ratio Priors (avoids hard cliff cutoffs)
+        # 2. Strict Aspect Ratio separation between 1 and (2, 3)
         s_final = dict(tpl_s)
-        if aspect >= 1.80:
-            s_final[1] *= 1.15
-            s_final[2] *= 0.85
-            s_final[3] *= 0.85
-        elif aspect < 1.35:
-            s_final[1] *= 0.70
+        if aspect >= 1.70:
+            s_final[1] *= 1.30
+            s_final[2] *= 0.70
+            s_final[3] *= 0.40  # 1 is slender, 3 is wide: strictly suppress 3
+        elif aspect <= 1.45:
+            s_final[1] *= 0.40  # 2 and 3 are wide curves: strictly suppress 1
 
         # 3. Lower-mid centroid discrimination (Y 65% ~ 82% horizontal centroid X)
         # Digit 2 has diagonal stroke leaning left (cg_x <= 0.38)
@@ -139,13 +149,13 @@ class DigitClassifier:
         ys, xs = np.where(lower_mid > 100)
         cg_x = np.mean(xs) / float(tw) if len(xs) > 0 else 0.50
 
-        if aspect < 1.80:
+        if aspect < 1.75:
             if cg_x <= 0.38:
-                s_final[2] *= 1.12
-                s_final[3] *= 0.88
+                s_final[2] *= 1.15
+                s_final[3] *= 0.85
             elif cg_x >= 0.62:
-                s_final[3] *= 1.12
-                s_final[2] *= 0.88
+                s_final[3] *= 1.15
+                s_final[2] *= 0.85
 
         return {d: max(0.0, min(1.0, float(s))) for d, s in s_final.items()}
 
@@ -288,7 +298,7 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
 
 
 def match_rings_to_digits(ring_scores_list: list[dict[int, float]],
-                          min_confidence: float = 0.35,
+                          min_confidence: float = 0.65,
                           min_margin: float = 0.10) -> list[int]:
     """Globally assign unique digits (1, 2, 3) to up to 3 rings without duplicate conflicts.
 
@@ -331,13 +341,15 @@ def match_rings_to_digits(ring_scores_list: list[dict[int, float]],
             best_assignment = valid_perm
 
     # Deadband protection: safely demote borderline / ambiguous candidates to 5 (unknown)
+    # Strictly enforces that target score must be >= min_confidence, and must beat 2nd place by min_margin
     safe_assignment = list(best_assignment)
     for ring_idx, digit in enumerate(safe_assignment):
         if digit in (1, 2, 3):
             scores = ring_scores_list[ring_idx]
+            target_score = scores.get(digit, 0.0)
             sorted_vals = sorted(scores.values(), reverse=True)
-            margin = sorted_vals[0] - sorted_vals[1]
-            if margin < min_margin:
+            margin = sorted_vals[0] - sorted_vals[1] if len(sorted_vals) > 1 else sorted_vals[0]
+            if target_score < min_confidence or margin < min_margin:
                 safe_assignment[ring_idx] = 5
 
     return safe_assignment

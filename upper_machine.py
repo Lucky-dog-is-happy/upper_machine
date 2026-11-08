@@ -379,7 +379,8 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
                  param2: float = 0.72,
                  digit_classifier: "DigitClassifier | None" = None,
-                 max_rings: int = 3) -> list[RingInfo]:
+                 max_rings: int = 3,
+                 digit_min_conf: float = 0.65) -> list[RingInfo]:
     """Detect ground black circular rings and classify inner digits 1, 2, 3."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -431,7 +432,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
             extract_digit_scores_from_ring(frame, cx, cy, r, digit_classifier)
             for cx, cy, r, _ in selected
         ]
-        assigned_ids = match_rings_to_digits(scores_list, min_confidence=0.35)
+        assigned_ids = match_rings_to_digits(scores_list, min_confidence=digit_min_conf)
     else:
         assigned_ids = [5] * len(selected)
 
@@ -672,6 +673,8 @@ def main():
                         help="Min ring color area (px) to accept a ring (default 100, adaptive for small rings)")
     parser.add_argument("--ring-param2", type=float, default=0.72,
                         help="HoughCircles param2 (circle perfectness, default 0.72) for ring detection")
+    parser.add_argument("--digit-min-conf", type=float, default=0.65,
+                        help="Min confidence threshold for digit recognition (default: 0.65)")
     parser.add_argument("--flip-h", action="store_true",
                         help="Horizontally flip camera frame (for mirrored cameras)")
     parser.add_argument("--flip-v", action="store_true",
@@ -816,7 +819,8 @@ def main():
                                  args.ring_max_radius, args.ring_min_area,
                                  args.ring_param2,
                                  digit_classifier=digit_classifier if HAS_DIGIT_CLASSIFIER else None,
-                                 max_rings=3)
+                                 max_rings=3,
+                                 digit_min_conf=args.digit_min_conf)
             draw_rings(display_block, rings)
             target_ids = [str(r.digit_id) if r.digit_id in (1, 2, 3) else "?" for r in rings]
             ring_desc = f" [{', '.join(target_ids)}]" if target_ids else ""

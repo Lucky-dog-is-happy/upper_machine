@@ -103,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Min black pixel count inside ring annulus (default 100, adaptive for small rings)")
     parser.add_argument("--ring-param2", type=float, default=0.72,
                         help="HoughCircles param2 (circle perfectness, 0~1, default 0.72)")
+    parser.add_argument("--digit-min-conf", type=float, default=0.65,
+                        help="Min confidence threshold for digit recognition (default: 0.65)")
 
     parser.add_argument("--flip-h", action="store_true",
                         help="Horizontally flip camera frame (for mirrored cameras)")
@@ -323,6 +325,7 @@ def main(argv: list[str] | None = None):
                 param2=args.ring_param2,
                 digit_classifier=digit_classifier,
                 max_rings=3,
+                digit_min_conf=args.digit_min_conf,
             )
             draw_rings(display_block, rings)
             target_ids = [str(r.digit_id) if r.digit_id in (1, 2, 3) else "?" for r in rings]
