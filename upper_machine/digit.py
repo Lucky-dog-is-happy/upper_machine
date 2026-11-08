@@ -132,6 +132,21 @@ class DigitClassifier:
         elif aspect < 1.35:
             s_final[1] *= 0.70
 
+        # 3. Lower-mid centroid discrimination (Y 65% ~ 82% horizontal centroid X)
+        # Digit 2 has diagonal stroke leaning left (cg_x <= 0.38)
+        # Digit 3 has lower circle curve leaning right (cg_x >= 0.62)
+        lower_mid = t[int(th * 0.65):int(th * 0.82), :]
+        ys, xs = np.where(lower_mid > 100)
+        cg_x = np.mean(xs) / float(tw) if len(xs) > 0 else 0.50
+
+        if aspect < 1.80:
+            if cg_x <= 0.38:
+                s_final[2] *= 1.12
+                s_final[3] *= 0.88
+            elif cg_x >= 0.62:
+                s_final[3] *= 1.12
+                s_final[2] *= 0.88
+
         return {d: max(0.0, min(1.0, float(s))) for d, s in s_final.items()}
 
     def evaluate(self, binary_crop: np.ndarray) -> dict[int, float]:
@@ -273,10 +288,12 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
 
 
 def match_rings_to_digits(ring_scores_list: list[dict[int, float]],
-                          min_confidence: float = 0.35) -> list[int]:
+                          min_confidence: float = 0.35,
+                          min_margin: float = 0.10) -> list[int]:
     """Globally assign unique digits (1, 2, 3) to up to 3 rings without duplicate conflicts.
 
-    Returns a list of target_id (1, 2, 3, or 5 for unassigned/unconfident) of the same length.
+    Includes deadband protection: if top score does not beat 2nd place by at least
+    min_margin, the candidate is safely demoted to 5 (unknown) to prevent false positives.
     """
     n_rings = len(ring_scores_list)
     if n_rings == 0:
@@ -313,4 +330,14 @@ def match_rings_to_digits(ring_scores_list: list[dict[int, float]],
             best_total_score = composite_score
             best_assignment = valid_perm
 
-    return best_assignment
+    # Deadband protection: safely demote borderline / ambiguous candidates to 5 (unknown)
+    safe_assignment = list(best_assignment)
+    for ring_idx, digit in enumerate(safe_assignment):
+        if digit in (1, 2, 3):
+            scores = ring_scores_list[ring_idx]
+            sorted_vals = sorted(scores.values(), reverse=True)
+            margin = sorted_vals[0] - sorted_vals[1]
+            if margin < min_margin:
+                safe_assignment[ring_idx] = 5
+
+    return safe_assignment
