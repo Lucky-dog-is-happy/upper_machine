@@ -104,17 +104,16 @@ class DigitClassifier:
         self.templates = create_digit_templates(size=NORM_SIZE)
 
     def _evaluate_single_view(self, t: np.ndarray) -> dict[int, float]:
-        """Evaluate a binary crop in a specific orientation."""
+        """Evaluate a binary crop in a specific orientation using multi-font normalized template matching and soft priors."""
         th, tw = t.shape[:2]
         if th < 8 or tw < 3:
             return {1: 0.0, 2: 0.0, 3: 0.0}
 
         aspect = th / float(tw)
 
-        # 1. Template Matching Correlation
+        # 1. Multi-font normalized template matching correlation
         pad = max(2, int(max(th, tw) * 0.1))
-        padded = cv2.copyMakeBorder(t, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
-        norm = cv2.resize(padded, (NORM_SIZE, NORM_SIZE))
+        norm = cv2.resize(cv2.copyMakeBorder(t, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0), (NORM_SIZE, NORM_SIZE))
 
         tpl_s = {}
         for d in [1, 2, 3]:
@@ -124,54 +123,19 @@ class DigitClassifier:
                 s = max(s, float(res[0][0]))
             tpl_s[d] = max(0.0, s)
 
-        # 2. Key Geometric Features
-        # Lower-mid (Y 65% ~ 82%) horizontal centroid X
-        lower_mid = t[int(th * 0.65):int(th * 0.82), :]
-        ys, xs = np.where(lower_mid > 100)
-        if len(xs) > 0:
-            cg_x = np.mean(xs) / float(tw)
-        else:
-            cg_x = 0.50
+        # 2. Soft Aspect Ratio Priors (avoids hard cliff cutoffs)
+        s_final = dict(tpl_s)
+        if aspect >= 1.80:
+            s_final[1] *= 1.15
+            s_final[2] *= 0.85
+            s_final[3] *= 0.85
+        elif aspect < 1.35:
+            s_final[1] *= 0.70
 
-        # Mid-waist (Y 42% ~ 55%) width span
-        mid_strip = t[int(th * 0.42):int(th * 0.55), :]
-        if mid_strip.size > 0:
-            mid_cols = np.where(np.any(mid_strip > 100, axis=0))[0]
-            mid_span = (mid_cols[-1] - mid_cols[0] + 1) / float(tw) if len(mid_cols) > 0 else 0.0
-        else:
-            mid_span = 0.0
-
-        # 3. Fuse Template and Geometry
-        scores = {1: tpl_s[1] * 0.5, 2: tpl_s[2] * 0.5, 3: tpl_s[3] * 0.5}
-
-        # Rules for 1 (Slender vertical body, aspect ratio >= 2.05 in real images)
-        if aspect >= 2.05:
-            scores[1] += 0.50
-            scores[2] -= 0.35
-            scores[3] -= 0.35
-        elif aspect < 1.30:
-            scores[1] -= 0.40
-
-        # Rules for 2 vs 3 (Lower-mid centroid is the ground-truth discriminator):
-        # Digit 2: cg_x <= 0.40 (diagonal stroke occupies the left half)
-        # Digit 3: cg_x >= 0.60 (lower circle hollow leaves the left half empty, black is on the right)
-        if cg_x <= 0.40 and aspect < 2.05:
-            scores[2] += 0.50
-            scores[3] -= 0.35
-        elif cg_x >= 0.60 and aspect < 2.05:
-            scores[3] += 0.50
-            scores[2] -= 0.35
-        else:
-            # Transition zone: check mid waist beam
-            if mid_span >= 0.45 and aspect < 2.05:
-                scores[3] += 0.30
-            elif aspect < 2.05:
-                scores[2] += 0.30
-
-        return {d: max(0.0, min(1.0, float(s))) for d, s in scores.items()}
+        return {d: max(0.0, min(1.0, float(s))) for d, s in s_final.items()}
 
     def evaluate(self, binary_crop: np.ndarray) -> dict[int, float]:
-        """Return confidence scores (0.0 ~ 1.0) with consistent view-level orientation adaptation."""
+        """Return confidence scores (0.0 ~ 1.0) by selecting the most confident, consistent view orientation."""
         h, w = binary_crop.shape[:2]
         if h < 8 or w < 3:
             return {1: 0.0, 2: 0.0, 3: 0.0}
@@ -183,16 +147,14 @@ class DigitClassifier:
         ]
 
         best_view_scores = {1: 0.0, 2: 0.0, 3: 0.0}
-        best_peak_margin = -999.0
+        best_peak = -1.0
 
         for view in orientations:
             s = self._evaluate_single_view(view)
             sorted_s = sorted(s.values(), reverse=True)
             peak = sorted_s[0]
-            margin = peak - sorted_s[1]
-            composite = peak + margin
-            if composite > best_peak_margin:
-                best_peak_margin = composite
+            if peak > best_peak:
+                best_peak = peak
                 best_view_scores = s
 
         return best_view_scores
