@@ -198,6 +198,43 @@ class DigitClassifier:
         return best_view_scores
 
 
+def deskew_and_crop(thresh: np.ndarray, cnt: np.ndarray) -> np.ndarray:
+    """Deskew angled character using minimum area bounding rectangle and return upright crop."""
+    h_roi, w_roi = thresh.shape[:2]
+    rect = cv2.minAreaRect(cnt)
+    (cx, cy), (w, h), angle = rect
+
+    # Digits 1, 2, 3 are taller than wide. Ensure the long axis is vertical.
+    if w < h:
+        deskew_angle = angle
+    else:
+        deskew_angle = angle + 90
+
+    M = cv2.getRotationMatrix2D((cx, cy), deskew_angle, 1.0)
+    rotated = cv2.warpAffine(
+        thresh, M, (w_roi, h_roi),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0
+    )
+
+    cnts, _ = cv2.findContours(rotated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        bx, by, bw, bh = cv2.boundingRect(cnt)
+        return thresh[by:by + bh, bx:bx + bw]
+
+    # Find the contour closest to the original center
+    best_c = min(
+        cnts,
+        key=lambda c: np.hypot(
+            cv2.boundingRect(c)[0] + cv2.boundingRect(c)[2] / 2.0 - cx,
+            cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3] / 2.0 - cy
+        )
+    )
+    bx, by, bw, bh = cv2.boundingRect(best_c)
+    return rotated[by:by + bh, bx:bx + bw]
+
+
 def extract_digit_scores_from_ring(frame: np.ndarray,
                                     cx: int, cy: int, radius: int,
                                     classifier: DigitClassifier,
@@ -206,6 +243,7 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
 
     Default inner_ratio=0.42 strictly confines the search to the central white region,
     completely avoiding the inner concentric rings of the contest target.
+    Automatically deskews angled digits before classification.
     """
     h_img, w_img = frame.shape[:2]
     inner_r = max(8, int(radius * inner_ratio))
@@ -255,17 +293,16 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
     if not candidates:
         return {1: 0.0, 2: 0.0, 3: 0.0}
 
+    # Evaluate the largest clean central contour with automatic deskewing
     largest = max(candidates, key=lambda c: c[1])
-    _, _, _, lbx, lby, lbw, lbh = largest
-    crop_largest = thresh[lby:lby + lbh, lbx:lbx + lbw]
+    cnt_largest = largest[0]
+    crop_largest = deskew_and_crop(thresh, cnt_largest)
     best_scores = classifier.evaluate(crop_largest)
 
+    # If multiple fragments exist, evaluate deskewed merged cluster
     if len(candidates) > 1:
-        min_bx = min(c[3] for c in candidates)
-        min_by = min(c[4] for c in candidates)
-        max_bx = max(c[3] + c[5] for c in candidates)
-        max_by = max(c[4] + c[6] for c in candidates)
-        crop_merged = thresh[min_by:max_by, min_bx:max_bx]
+        merged_pts = np.vstack([c[0] for c in candidates])
+        crop_merged = deskew_and_crop(thresh, merged_pts)
         scores_merged = classifier.evaluate(crop_merged)
         if max(scores_merged.values()) > max(best_scores.values()):
             best_scores = scores_merged
