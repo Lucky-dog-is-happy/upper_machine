@@ -9,7 +9,7 @@ Usage Examples:
   # 1. Capture from default camera 0:
   python capture_photo.py
 
-  # 2. Capture from camera 2 with prefix 'digits' (saved as digits_8.jpeg, digits_9.jpeg...):
+  # 2. Capture from camera 2 with prefix 'digits' (saved as digits_1.jpeg, digits_2.jpeg...):
   python capture_photo.py --camera 2 --prefix digits
 
   # 3. Capture from specific V4L2 device (e.g. /dev/video20) at 1280x720:
