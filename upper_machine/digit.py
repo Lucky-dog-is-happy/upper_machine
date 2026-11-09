@@ -134,13 +134,15 @@ class DigitClassifier:
             tpl_s[d] = max(0.0, s)
 
         # 2. Strict Aspect Ratio separation between 1 and (2, 3)
+        # Digits 2 and 3 have aspect ratio around 1.35 ~ 1.75.
+        # Only truly slender strokes (aspect >= 1.95) should be favored as digit 1.
         s_final = dict(tpl_s)
-        if aspect >= 1.70:
-            s_final[1] *= 1.30
+        if aspect >= 1.95:
+            s_final[1] *= 1.25
             s_final[2] *= 0.70
-            s_final[3] *= 0.40  # 1 is slender, 3 is wide: strictly suppress 3
-        elif aspect <= 1.45:
-            s_final[1] *= 0.40  # 2 and 3 are wide curves: strictly suppress 1
+            s_final[3] *= 0.50
+        elif aspect <= 1.35:
+            s_final[1] *= 0.40
 
         # 3. Lower-mid centroid discrimination (Y 65% ~ 82% horizontal centroid X)
         # Digit 2 has diagonal stroke leaning left (cg_x <= 0.38)
@@ -168,6 +170,7 @@ class DigitClassifier:
         orientations = [
             binary_crop,
             cv2.rotate(binary_crop, cv2.ROTATE_180),
+            cv2.rotate(binary_crop, cv2.ROTATE_90_CLOCKWISE),
             cv2.flip(binary_crop, 1),
         ]
 
