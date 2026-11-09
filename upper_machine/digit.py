@@ -144,18 +144,40 @@ class DigitClassifier:
         elif aspect <= 1.35:
             s_final[1] *= 0.40
 
-        # 3. Lower-mid centroid discrimination (Y 65% ~ 82% horizontal centroid X)
+        # 3. Mid-Waist Beam Span Discrimination (Y 40% ~ 60%)
+        # Digit 3 has a prominent horizontal middle beam spanning >= 48% of total width.
+        # Digit 1 is a uniform vertical column strictly < 35% with no cross beam.
+        mid_strip = t[int(th * 0.40):int(th * 0.60), :]
+        mid_spans = []
+        for row in mid_strip:
+            idx = np.where(row > 100)[0]
+            if len(idx) > 0:
+                mid_spans.append((idx[-1] - idx[0] + 1) / float(tw))
+        max_mid_span = max(mid_spans) if mid_spans else 0.0
+
+        # Physical exclusion rule:
+        if aspect < 1.80:
+            if max_mid_span >= 0.48:
+                # Prominent horizontal middle beam on normal character: definitively NOT 1, strongly boost 3
+                s_final[3] *= 1.35
+                s_final[1] *= 0.20  # Completely cuts off the 3 -> 1 confusion path
+        elif aspect >= 1.80:
+            # Slender uniform column (aspect >= 1.80): definitively favors 1
+            s_final[1] *= 1.35
+            s_final[3] *= 0.20
+
+        # 4. Lower-mid centroid discrimination (Y 65% ~ 82% horizontal centroid X)
         # Digit 2 has diagonal stroke leaning left (cg_x <= 0.38)
-        # Digit 3 has lower circle curve leaning right (cg_x >= 0.62)
+        # Digit 3 has lower circle curve leaning right (cg_x >= 0.60)
         lower_mid = t[int(th * 0.65):int(th * 0.82), :]
         ys, xs = np.where(lower_mid > 100)
         cg_x = np.mean(xs) / float(tw) if len(xs) > 0 else 0.50
 
-        if aspect < 1.75:
+        if aspect < 1.85:
             if cg_x <= 0.38:
                 s_final[2] *= 1.15
                 s_final[3] *= 0.85
-            elif cg_x >= 0.62:
+            elif cg_x >= 0.60:
                 s_final[3] *= 1.15
                 s_final[2] *= 0.85
 
