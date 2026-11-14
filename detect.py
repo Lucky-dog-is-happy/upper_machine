@@ -51,12 +51,16 @@ COLORS = {
 MIN_RADIUS = 40
 
 
-def get_mask(hsv, lower, upper):
-    mask = cv2.inRange(hsv, lower, upper)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+def clean_mask(mask, kernel_size=(5, 5)):
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
     return mask
+
+
+def get_mask(hsv, lower, upper):
+    mask = cv2.inRange(hsv, lower, upper)
+    return clean_mask(mask)
 
 
 def detect(mask):
@@ -95,10 +99,13 @@ def main():
         for name, cfg in COLORS.items():
             if name == "red2":
                 continue
-            mask = get_mask(hsv, cfg["lower"], cfg["upper"])
             if name == "red":
-                mask2 = get_mask(hsv, COLORS["red2"]["lower"], COLORS["red2"]["upper"])
-                mask = cv2.bitwise_or(mask, mask2)
+                raw1 = cv2.inRange(hsv, cfg["lower"], cfg["upper"])
+                raw2 = cv2.inRange(hsv, COLORS["red2"]["lower"], COLORS["red2"]["upper"])
+                mask = cv2.bitwise_or(raw1, raw2)
+                mask = clean_mask(mask)
+            else:
+                mask = get_mask(hsv, cfg["lower"], cfg["upper"])
 
             circles = detect(mask)
             for cx, cy, r in circles:

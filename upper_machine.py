@@ -278,14 +278,19 @@ def parse_task_code(text: str) -> TaskCode:
 
 # ── Color detection ───────────────────────────────────────────────────────────
 
-def get_mask(hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray,
-             kernel_size: tuple[int, int] = (5, 5)) -> np.ndarray:
-    mask = cv2.inRange(hsv, lower, upper)
+def clean_mask(mask: np.ndarray, kernel_size: tuple[int, int] = (5, 5)) -> np.ndarray:
+    """Apply morphological open and close to a binary mask."""
     if kernel_size[0] > 1 and kernel_size[1] > 1:
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, kernel_size)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
     return mask
+
+
+def get_mask(hsv: np.ndarray, lower: np.ndarray, upper: np.ndarray,
+             kernel_size: tuple[int, int] = (5, 5)) -> np.ndarray:
+    mask = cv2.inRange(hsv, lower, upper)
+    return clean_mask(mask, kernel_size)
 
 
 def dedup_blocks(blocks: list[BlockInfo], tolerance: int = 20) -> list[BlockInfo]:
@@ -312,10 +317,13 @@ def detect_blocks(hsv: np.ndarray,
     for name, cfg in COLOR_HSV.items():
         if name == "red2":
             continue
-        mask = get_mask(hsv, cfg["lower"], cfg["upper"])
         if name == "red":
-            mask2 = get_mask(hsv, COLOR_HSV["red2"]["lower"], COLOR_HSV["red2"]["upper"])
-            mask = cv2.bitwise_or(mask, mask2)
+            mask1 = cv2.inRange(hsv, cfg["lower"], cfg["upper"])
+            mask2 = cv2.inRange(hsv, COLOR_HSV["red2"]["lower"], COLOR_HSV["red2"]["upper"])
+            mask = cv2.bitwise_or(mask1, mask2)
+            mask = clean_mask(mask)
+        else:
+            mask = get_mask(hsv, cfg["lower"], cfg["upper"])
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in contours:

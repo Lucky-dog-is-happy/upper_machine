@@ -31,3 +31,4 @@ images_videos/
 # OS artifacts
 .DS_Store
 Thumbs.db
+Photo from*.jpeg
