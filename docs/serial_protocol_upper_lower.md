@@ -19,8 +19,9 @@
 | `--block-camera` | `/dev/video20` | str/int | 物块与圆环检测摄像头，支持路径或编号 |
 | `--qr-camera` | `0` | str/int | 二维码识别摄像头 |
 | `--no-qr` | `False` | bool | 单摄模式：关闭二维码相机，仅运行物料/圆环相机与串口 |
-| `--qr-send-duration` | `5.0` | float | 二维码确认后持续广播秒数，超时后自动停发任务码 |
-| `--send-interval` | `0.5` | float | 串口上报数据的时间间隔（秒） |
+| `--qr-send-duration` | `5.0` | float | 二维码确认后持续广播秒数（默认 5.0 秒），超时后自动停发任务码 |
+| `--qr-send-interval` | `0.1` | float | 二维码广播期间发送时间间隔（秒，默认 0.1s 发送一次） |
+| `--send-interval` | `0.5` | float | 物料与圆环视觉坐标上报时间间隔（秒，默认 0.5s） |
 | `--mode` | `block` | choice | 初始检测模式（`block` 物料 / `ring` 圆环） |
 | `--list-ports` | - | action | 列出主机所有可用串口设备并退出 |
 

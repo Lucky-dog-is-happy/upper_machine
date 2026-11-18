@@ -1,9 +1,9 @@
-"""Full-Screen Task Code & Gripper Statistics Display Component (12 Digits, 4 Groups).
+"""Full-Screen Task Code & Gripper Statistics Display Component (3-Row Layout).
 
 Layout:
-  - Top 3/4: 12-digit task code in 4 groups (e.g. [ 156 ] + [ 123 ] + [ 516 ] + [ 231 ])
-    Before QR code is detected, numbers are hidden and replaced with placeholders [ --- ].
-  - Bottom 1/4: Gripper stats: 抓取：X   放置：Y (Pick: X, Place: Y)
+  - Row 1: Batch 1 task code 'xxx+xxx' (Large bold font)
+  - Row 2: Batch 2 task code 'xxx+xxx' (Large bold font)
+  - Row 3: Progress display (Pick & Place statistics, smaller font)
   - Full-screen auto-adaptation: Scales fonts and paddings dynamically to fit any display.
 """
 
@@ -91,7 +91,8 @@ class TaskDisplay:
                  height: int | None = None,
                  fullscreen: bool = True,
                  show_group_labels: bool = True,
-                 window_name: str = "Robot Task & Gripper Monitor"):
+                 window_name: str = "Robot Task & Gripper Monitor",
+                 task_code: str | None = None):
         self.lock = threading.Lock()
         self.running = False
         self.thread: threading.Thread | None = None
@@ -103,11 +104,8 @@ class TaskDisplay:
         self.width = width or detected_w
         self.height = height or detected_h
 
-        self.top_h = int(self.height * 0.75)
-        self.bot_h = self.height - self.top_h
-
         # Data states: task_code is None until QR is detected
-        self.task_code: str | None = None
+        self.task_code: str | None = str(task_code).strip() if task_code else None
         self.pick_count: int = 0
         self.place_count: int = 0
 
@@ -182,132 +180,158 @@ class TaskDisplay:
         return ImageFont.load_default()
 
     def render_frame(self) -> np.ndarray:
-        """Render the complete UI frame as a BGR numpy array for OpenCV."""
+        """Render the 3-row clean UI frame as a BGR numpy array for OpenCV.
+
+        Row 1: Batch 1 task code 'xxx + xxx' (Large bold font, perfectly centered)
+        Row 2: Batch 2 task code 'xxx + xxx' (Large bold font, perfectly centered)
+        Row 3: Pick & Place statistics '抓取：X   放置：Y' (Smaller font, no extra text)
+        """
         with self.lock:
             raw_task = self.task_code
             pick_cnt = self.pick_count
             place_cnt = self.place_count
 
         W, H = self.width, self.height
-        top_h = self.top_h
-        bot_h = self.bot_h
 
         img = Image.new("RGB", (W, H), self.bg_color)
         draw = ImageDraw.Draw(img)
 
-        # ── 1. Top 3/4 Area: 12-Digit 4-Group Task Code ───────────────────────
-        groups, is_valid = self._parse_groups(raw_task)
-        num_groups = len(groups)
+        # ── Parse Task Code into Batch 1 and Batch 2 ────────────────────────
+        is_valid = bool(raw_task and str(raw_task).strip())
+        if is_valid:
+            clean = str(raw_task).strip()
+            if "+" in clean:
+                parts = [p.strip() for p in clean.split("+") if p.strip()]
+                if len(parts) >= 4:
+                    r1_1, r1_2 = parts[0], parts[1]
+                    r2_1, r2_2 = parts[2], parts[3]
+                elif len(parts) >= 2:
+                    r1_1, r1_2 = parts[0], parts[1]
+                    r2_1, r2_2 = "---", "---"
+                else:
+                    r1_1, r1_2 = parts[0], "---"
+                    r2_1, r2_2 = "---", "---"
+            else:
+                digits = "".join(filter(str.isdigit, clean))
+                if len(digits) >= 12:
+                    r1_1, r1_2 = digits[0:3], digits[3:6]
+                    r2_1, r2_2 = digits[6:9], digits[9:12]
+                else:
+                    r1_1, r1_2 = clean, "---"
+                    r2_1, r2_2 = "---", "---"
+        else:
+            r1_1, r1_2 = "---", "---"
+            r2_1, r2_2 = "---", "---"
 
-        # Header Title
-        title_font_size = max(16, int(H * 0.03))
-        font_title = self._get_font(title_font_size)
-        title_text = "任务编码 (TASK CODE - 4 GROUPS)" if is_valid else "任务编码 (TASK CODE - WAITING FOR QR)"
-        draw.text((W * 0.03, H * 0.03), title_text, fill=self.plus_color, font=font_title)
+        # ── Layout Geometry ─────────────────────────────────────────────────
+        margin_x = int(W * 0.04)
+        margin_y = int(H * 0.03)
+        gap_y = int(H * 0.025)
+        card_w = W - margin_x * 2
 
-        # Waiting prompt text if QR code not detected yet
-        card_border_color = self.card_border if is_valid else self.card_border_waiting
-        digit_text_color = self.task_color if is_valid else self.placeholder_color
-        plus_text_color = self.plus_color if is_valid else self.plus_color_waiting
+        # 3 Rows height allocation:
+        # Row 1 (Batch 1): ~39% of available height
+        # Row 2 (Batch 2): ~39% of available height
+        # Row 3 (Stats): ~22% of available height
+        avail_h = H - margin_y * 2 - gap_y * 2
+        row_h_1 = int(avail_h * 0.39)
+        row_h_2 = int(avail_h * 0.39)
+        row_h_3 = avail_h - row_h_1 - row_h_2
 
-        target_digit_size = int(min(W * 0.08, top_h * 0.28))
-        font_digits = self._get_font(target_digit_size)
-        font_plus = self._get_font(int(target_digit_size * 0.80))
-        font_sub = self._get_font(max(14, int(target_digit_size * 0.20)))
+        y1 = margin_y
+        y2 = y1 + row_h_1 + gap_y
+        y3 = y2 + row_h_2 + gap_y
 
-        sample_bbox = font_digits.getbbox("888")
-        gw_sample = sample_bbox[2] - sample_bbox[0]
-        gh_sample = sample_bbox[3] - sample_bbox[1]
+        card_radius = max(6, int(row_h_1 * 0.10))
 
-        card_pad_x = int(target_digit_size * 0.16)
-        card_w = gw_sample + card_pad_x * 2
-        card_h = gh_sample + int(target_digit_size * 0.35)
+        # Fonts for Row 1 & Row 2 (Ultra-large font, high visual impact)
+        font_size_large = int(row_h_1 * 0.78)
+        font_large = self._get_font(font_size_large)
+        font_plus = self._get_font(int(font_size_large * 0.85))
 
-        plus_bbox = font_plus.getbbox("+")
-        plus_w = plus_bbox[2] - plus_bbox[0]
-        plus_h = plus_bbox[3] - plus_bbox[1]
-        spacing = int(target_digit_size * 0.22)
+        # Height safety guard: glyph height should not exceed 75% of row height
+        sample_h = font_large.getbbox("888")[3] - font_large.getbbox("888")[1]
+        if sample_h > row_h_1 * 0.75:
+            scale_h = (row_h_1 * 0.75) / sample_h
+            font_size_large = max(20, int(font_size_large * scale_h))
+            font_large = self._get_font(font_size_large)
+            font_plus = self._get_font(int(font_size_large * 0.85))
 
-        total_w = num_groups * card_w + (num_groups - 1) * (plus_w + spacing * 2)
+        # Width safety guard: ensure text never exceeds card width (max 88% of card width)
+        test_w = (font_large.getbbox("888")[2] - font_large.getbbox("888")[0]) * 2 + (font_plus.getbbox(" + ")[2] - font_plus.getbbox(" + ")[0])
+        if test_w > card_w * 0.88:
+            scale_w = (card_w * 0.88) / test_w
+            font_size_large = max(20, int(font_size_large * scale_w))
+            font_large = self._get_font(font_size_large)
+            font_plus = self._get_font(int(font_size_large * 0.85))
 
-        if total_w > W * 0.94:
-            scale = (W * 0.94) / total_w
-            target_digit_size = max(24, int(target_digit_size * scale))
-            font_digits = self._get_font(target_digit_size)
-            font_plus = self._get_font(int(target_digit_size * 0.80))
-            font_sub = self._get_font(max(12, int(target_digit_size * 0.20)))
+        card_border_active = self.card_border
+        card_border_dim = self.card_border_waiting
+        digit_color = self.task_color if is_valid else self.placeholder_color
+        plus_color = self.plus_color if is_valid else (71, 85, 105)
 
-            sample_bbox = font_digits.getbbox("888")
-            gw_sample = sample_bbox[2] - sample_bbox[0]
-            gh_sample = sample_bbox[3] - sample_bbox[1]
+        # ── Draw Code Row 1 & Row 2 (Centered 'xxx + xxx' only) ─────────────
+        def draw_code_card(y: int, h: int, p1: str, p2: str):
+            border_col = card_border_active if is_valid else card_border_dim
 
-            card_pad_x = int(target_digit_size * 0.16)
-            card_w = gw_sample + card_pad_x * 2
-            card_h = gh_sample + int(target_digit_size * 0.35)
-
-            plus_bbox = font_plus.getbbox("+")
-            plus_w = plus_bbox[2] - plus_bbox[0]
-            plus_h = plus_bbox[3] - plus_bbox[1]
-            spacing = int(target_digit_size * 0.22)
-
-            total_w = num_groups * card_w + (num_groups - 1) * (plus_w + spacing * 2)
-
-        start_x = (W - total_w) // 2
-        mid_y = int(top_h * 0.50)
-        card_y = mid_y - card_h // 2
-
-        # Draw "等待扫描二维码中..." prompt above cards if QR not yet detected
-        if not is_valid:
-            font_prompt = self._get_font(max(18, int(H * 0.032)))
-            prompt_str = "等待扫描二维码中..."
-            p_bbox = font_prompt.getbbox(prompt_str)
-            pw = p_bbox[2] - p_bbox[0]
-            draw.text(((W - pw) // 2, card_y - int(H * 0.055)), prompt_str, fill=self.warn_color, font=font_prompt)
-
-        cur_x = start_x
-        for i, g in enumerate(groups):
-            bbox = font_digits.getbbox(g)
-            w_g = bbox[2] - bbox[0]
-
-            # 1. Rounded Card Background
+            # Card background
             draw.rounded_rectangle(
-                [(cur_x, card_y), (cur_x + card_w, card_y + card_h)],
-                radius=max(6, int(card_h * 0.12)),
+                [(margin_x, y), (margin_x + card_w, y + h)],
+                radius=card_radius,
                 fill=self.card_bg,
-                outline=card_border_color,
-                width=max(2, int(target_digit_size * 0.02))
+                outline=border_col,
+                width=2
             )
 
-            # 2. Centered Text
-            tx = cur_x + (card_w - w_g) // 2 - bbox[0]
-            ty = card_y + (card_h - gh_sample) // 2 - bbox[1]
-            draw.text((tx, ty), g, fill=digit_text_color, font=font_digits)
+            # Centered Text: p1 + " + " + p2
+            cur_font_large = font_large
+            cur_font_plus = font_plus
 
-            # 3. Sub-label annotation
-            if self.show_group_labels and i < len(self.GROUP_LABELS):
-                label_text = self.GROUP_LABELS[i]
-                s_bbox = font_sub.getbbox(label_text)
-                sw = s_bbox[2] - s_bbox[0]
-                label_y = card_y + card_h + int(H * 0.018)
-                draw.text((cur_x + (card_w - sw) // 2, label_y), label_text, fill=self.sub_label_color, font=font_sub)
+            bbox1 = cur_font_large.getbbox(p1)
+            w1 = bbox1[2] - bbox1[0]
+            bbox_p = cur_font_plus.getbbox(" + ")
+            wp = bbox_p[2] - bbox_p[0]
+            bbox2 = cur_font_large.getbbox(p2)
+            w2 = bbox2[2] - bbox2[0]
 
-            cur_x += card_w
+            total_w = w1 + wp + w2
+            if total_w > card_w * 0.88:
+                scale = (card_w * 0.88) / total_w
+                cur_font_large = self._get_font(max(14, int(font_size_large * scale)))
+                cur_font_plus = self._get_font(max(12, int(font_size_large * 0.85 * scale)))
+                bbox1 = cur_font_large.getbbox(p1)
+                w1 = bbox1[2] - bbox1[0]
+                bbox_p = cur_font_plus.getbbox(" + ")
+                wp = bbox_p[2] - bbox_p[0]
+                bbox2 = cur_font_large.getbbox(p2)
+                w2 = bbox2[2] - bbox2[0]
+                total_w = w1 + wp + w2
 
-            # 4. Connector '+'
-            if i < num_groups - 1:
-                cur_x += spacing
-                px = cur_x - plus_bbox[0]
-                py = mid_y - plus_h // 2 - plus_bbox[1]
-                draw.text((px, py), "+", fill=plus_text_color, font=font_plus)
-                cur_x += plus_w + spacing
+            sx = margin_x + (card_w - total_w) // 2
 
-        # ── 2. Divider Line ───────────────────────────────────────────────────
-        draw.line([(W * 0.02, top_h), (W * 0.98, top_h)], fill=self.divider_color, width=3)
+            # Exact vertical centering within card
+            ty1 = y + (h - (bbox1[3] - bbox1[1])) // 2 - bbox1[1]
+            typ = y + (h - (bbox_p[3] - bbox_p[1])) // 2 - bbox_p[1]
+            ty2 = y + (h - (bbox2[3] - bbox2[1])) // 2 - bbox2[1]
 
-        # ── 3. Bottom 1/4 Area: 抓取：X   放置：Y ─────────────────────────────
-        draw.rectangle([(W * 0.015, top_h + 10), (W * 0.985, H - 12)], fill=self.card_bg)
+            draw.text((sx - bbox1[0], ty1), p1, fill=digit_color, font=cur_font_large)
+            draw.text((sx + w1 - bbox_p[0], typ), " + ", fill=plus_color, font=cur_font_plus)
+            draw.text((sx + w1 + wp - bbox2[0], ty2), p2, fill=digit_color, font=cur_font_large)
 
-        stat_font_size = int(min(W * 0.065, bot_h * 0.42))
+        # Draw Row 1 & Row 2
+        draw_code_card(y1, row_h_1, r1_1, r1_2)
+        draw_code_card(y2, row_h_2, r2_1, r2_2)
+
+        # ── Row 3: Only '抓取：X          放置：Y' (Smaller Font) ────────────
+        draw.rounded_rectangle(
+            [(margin_x, y3), (margin_x + card_w, y3 + row_h_3)],
+            radius=card_radius,
+            fill=self.card_bg,
+            outline=card_border_dim,
+            width=2
+        )
+
+        stat_font_size = int(row_h_3 * 0.42)
         font_stat = self._get_font(stat_font_size)
 
         segments = [
@@ -317,15 +341,21 @@ class TaskDisplay:
             (f" {place_cnt} ", self.place_color),
         ]
 
-        total_stat_w = sum(font_stat.getbbox(text)[2] - font_stat.getbbox(text)[0] for text, _ in segments)
-        stat_x = (W - total_stat_w) // 2
-        stat_y = top_h + (bot_h - stat_font_size) // 2
+        total_stat_w = sum(font_stat.getbbox(t)[2] - font_stat.getbbox(t)[0] for t, _ in segments)
+        if total_stat_w > card_w * 0.85:
+            scale = (card_w * 0.85) / total_stat_w
+            stat_font_size = max(16, int(stat_font_size * scale))
+            font_stat = self._get_font(stat_font_size)
+            total_stat_w = sum(font_stat.getbbox(t)[2] - font_stat.getbbox(t)[0] for t, _ in segments)
 
-        cur_sx = stat_x
-        for text, color in segments:
+        sx = margin_x + (card_w - total_stat_w) // 2
+        sy = y3 + (row_h_3 - stat_font_size) // 2
+
+        cur_x = sx
+        for text, col in segments:
             bbox = font_stat.getbbox(text)
-            draw.text((cur_sx, stat_y), text, fill=color, font=font_stat)
-            cur_sx += bbox[2] - bbox[0]
+            draw.text((cur_x - bbox[0], sy - bbox[1]), text, fill=col, font=font_stat)
+            cur_x += bbox[2] - bbox[0]
 
         rgb_arr = np.array(img)
         return cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
@@ -388,3 +418,20 @@ class TaskDisplay:
         self.running = False
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=1.0)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="TaskDisplay Runner")
+    parser.add_argument("--width", type=int, default=1024, help="Window width")
+    parser.add_argument("--height", type=int, default=600, help="Window height")
+    parser.add_argument("--code", type=str, default="156+123+516+231", help="Task code string")
+    parser.add_argument("--pick", type=int, default=0, help="Initial pick count")
+    parser.add_argument("--place", type=int, default=0, help="Initial place count")
+    parser.add_argument("--fullscreen", action="store_true", help="Start fullscreen")
+    args = parser.parse_args()
+
+    disp = TaskDisplay(width=args.width, height=args.height, fullscreen=args.fullscreen, task_code=args.code)
+    disp.set_counts(pick=args.pick, place=args.place)
+    disp.run()
+

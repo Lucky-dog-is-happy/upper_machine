@@ -11,7 +11,7 @@ PHASE 1  QR scanning (qr_active=True, when not --no-qr)
       • close QR camera → PHASE 2
 
 PHASE 2  Task-code timed broadcast + block detection
-  - Every send_interval: send_task_code() while now < qr_send_until
+  - Every qr_send_interval (default: 0.1s): send_task_code() while now < qr_send_until (default: 5.0s)
   - After qr_send_until passes: task-code serial sending stops permanently → PHASE 3
 
 PHASE 3  Block detection (MODE_BLOCK)
@@ -79,7 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--send-interval", type=float, default=0.5,
                         help="Seconds between serial sends (default 0.5)")
 
-    # QR send duration
+    # QR send duration and interval
+    parser.add_argument("--qr-send-interval", type=float, default=0.1,
+                        help="Seconds between task-code serial sends during broadcast (default 0.1)")
     parser.add_argument("--qr-send-duration", type=float, default=5.0,
                         help="Seconds to keep sending task-code after QR confirmed (default 5.0). "
                              "Set 0 to send only once immediately.")
@@ -213,6 +215,7 @@ def main(argv: list[str] | None = None):
     qr_candidate = ""
     qr_match_count = 0
     qr_send_until = 0.0          # timestamp after which task-code sending stops
+    last_qr_send_time = 0.0      # timestamp of last task-code broadcast
     task_code_sent = False
 
     last_send_time = 0.0
@@ -220,7 +223,7 @@ def main(argv: list[str] | None = None):
     mode = MODE_RING if args.mode == "ring" else MODE_BLOCK
 
     print(f"Running. Initial mode={'RING' if mode == MODE_RING else 'BLOCK'}. "
-          f"QR send duration={args.qr_send_duration}s.\n"
+          f"QR broadcast={args.qr_send_duration}s @ every {args.qr_send_interval}s.\n"
           "ESC=quit  m=toggle mode  p=print detections")
 
     # ════════════════════════════════════════════════════════════════════════
@@ -270,11 +273,12 @@ def main(argv: list[str] | None = None):
                             if qr_match_count >= 3:
                                 last_task_code = tc
                                 print(f"[QR] Confirmed: {tc.raw}. "
-                                      f"Will broadcast for {args.qr_send_duration}s.")
+                                      f"Will broadcast for {args.qr_send_duration}s (every {args.qr_send_interval}s).")
                                 if task_display:
                                     task_display.set_task_code(tc.raw)
                                 if sender:
                                     sender.send_task_code(tc)  # immediate send
+                                last_qr_send_time = now
                                 qr_send_until = now + args.qr_send_duration
                                 task_code_sent = True
                                 qr_active = False
@@ -369,13 +373,15 @@ def main(argv: list[str] | None = None):
             disp_frame = task_display.render_frame()
             cv2.imshow(WIN_DISPLAY, disp_frame)
 
+        # ── Periodic task-code broadcast (e.g. 0.1s interval while within 5.0s window) ──
+        if sender and last_task_code.valid and now < qr_send_until:
+            if now - last_qr_send_time >= args.qr_send_interval:
+                sender.send_task_code(last_task_code)
+                last_qr_send_time = now
+
         # ── Periodic send or console log (rate-limited by send_interval) ────
         if now - last_send_time >= args.send_interval:
             if sender:
-                # Broadcast task code while within timed window
-                if last_task_code.valid and now < qr_send_until:
-                    sender.send_task_code(last_task_code)
-
                 # Always send periodic detection status (count=0 acts as heartbeat/clear frame)
                 if mode == MODE_RING:
                     sender.send_rings(rings)

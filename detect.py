@@ -17,8 +17,8 @@ COLORS = {
         "bgr": (0, 255, 255),
     },
     "blue": {
-        "lower": np.array([98, 179, 0]),
-        "upper": np.array([121, 255, 255]),
+        "lower": np.array([114, 60, 45]),
+        "upper": np.array([130, 255, 255]),
         "bgr": (255, 0, 0),
     },
     "red": {
@@ -37,8 +37,8 @@ COLORS = {
         "bgr": (0, 255, 0),
     },
     "sky-blue": {
-        "lower": np.array([98, 0, 0]),
-        "upper": np.array([121, 190, 255]),
+        "lower": np.array([82, 45, 50]),
+        "upper": np.array([113, 255, 255]),
         "bgr": (255, 255, 0),
     },
     "black": {

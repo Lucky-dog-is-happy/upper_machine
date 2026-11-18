@@ -79,16 +79,16 @@ COLOR_HSV = {
         "upper": np.array([78, 255, 255]),
         "bgr": (0, 255, 0),
     },
-    # 浅蓝：锁定青蓝/天蓝色相 H[82, 103]，解除 S 上限至 255 解决高饱和被剔除
+    # 浅蓝/天蓝：实测色相中心位于 104 [102~112]，放宽 H 上限至 113，彻底避免物料被腰斩
     "sky-blue": {
-        "lower": np.array([82, 45, 60]),
-        "upper": np.array([103, 255, 255]),
+        "lower": np.array([82, 45, 50]),
+        "upper": np.array([113, 255, 255]),
         "bgr": (255, 255, 0),
     },
-    # 深蓝：锁定纯蓝色相 H[106, 128]，与天蓝物理隔离，放宽 S 适应反光
+    # 深蓝：实测色相中心位于 117 [115~124]，锁定 H[114, 130]，放宽 S 下限至 60 容忍高光
     "blue": {
-        "lower": np.array([106, 110, 45]),
-        "upper": np.array([128, 255, 255]),
+        "lower": np.array([114, 60, 45]),
+        "upper": np.array([130, 255, 255]),
         "bgr": (255, 0, 0),
     },
     # 黑色：限制 S 必须在 110 以下，防止把阴影下的暗色物料误判为黑
@@ -665,6 +665,11 @@ def main():
     parser.add_argument("--no-serial", action="store_true", help="Disable serial output")
     parser.add_argument("--send-interval", type=float, default=0.5,
                         help="Seconds between serial sends")
+    parser.add_argument("--qr-send-interval", type=float, default=0.1,
+                        help="Seconds between task-code serial sends during broadcast (default 0.1)")
+    parser.add_argument("--qr-send-duration", type=float, default=5.0,
+                        help="Seconds to keep sending task-code after QR confirmed (default 5.0). "
+                             "Set 0 to send only once immediately.")
     parser.add_argument("--mode", choices=["block", "ring"], default="block",
                         help="Initial detection mode (lower board overrides via MSG_MODE_CMD)")
     parser.add_argument("--block-min-radius", type=int, default=20, help="Min block radius (px)")
@@ -747,11 +752,14 @@ def main():
     last_task_code = TaskCode()
     qr_candidate = ""
     qr_match_count = 0
+    qr_send_until = 0.0
+    last_qr_send_time = 0.0
     last_send_time = 0.0
     consecutive_block_fails = 0
     mode = MODE_RING if args.mode == "ring" else MODE_BLOCK
 
     print(f"Running. mode={'RING' if mode == MODE_RING else 'BLOCK'}. "
+          f"QR broadcast={args.qr_send_duration}s @ every {args.qr_send_interval}s. "
           "ESC quit, m toggle mode.\n")
 
     while True:
@@ -781,9 +789,12 @@ def main():
                             print(f"[QR] Candidate: {tc.raw} ({qr_match_count}/3)")
                             if qr_match_count >= 3:
                                 last_task_code = tc
-                                print(f"[QR] Confirmed 3 times: {tc.raw}! Closing QR scan.")
+                                print(f"[QR] Confirmed: {tc.raw}. "
+                                      f"Will broadcast for {args.qr_send_duration}s (every {args.qr_send_interval}s).")
                                 if sender:
                                     sender.send_task_code(tc)
+                                last_qr_send_time = now
+                                qr_send_until = now + args.qr_send_duration
                                 qr_active = False
                                 cam_qr.stop()
                                 cv2.destroyWindow(window_qr)
@@ -863,10 +874,16 @@ def main():
 
         # ── Serial send or console log (task code + current mode result) ──
         now = time.time()
+
+        # Periodic task-code broadcast (e.g. 0.1s interval while within 5.0s window)
+        if sender and last_task_code.valid and now < qr_send_until:
+            if now - last_qr_send_time >= args.qr_send_interval:
+                sender.send_task_code(last_task_code)
+                last_qr_send_time = now
+
+        # Periodic detection send or console log (rate-limited by send_interval)
         if now - last_send_time >= args.send_interval:
             if sender:
-                if last_task_code.valid:
-                    sender.send_task_code(last_task_code)
                 # Always send periodic detection status (count=0 acts as heartbeat/clear frame)
                 if mode == MODE_RING:
                     sender.send_rings(rings)
