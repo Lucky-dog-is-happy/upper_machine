@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Upper machine: QR + color block/black-ring detector")
 
     # Camera defaults: QR=0, Block=/dev/video0
-    parser.add_argument("--qr-camera", type=str, default="2",
+    parser.add_argument("--qr-camera", type=str, default="4",
                         help="Camera index or path for QR scanning (default '0')")
     parser.add_argument("--block-camera", type=str, default="/dev/video0",
                         help="Camera index or path for block/ring detection (default '/dev/video0')")
