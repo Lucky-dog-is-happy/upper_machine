@@ -9,7 +9,7 @@ Usage Examples:
   # 1. Capture from default camera 0:
   python capture_photo.py
 
-  # 2. Capture from camera 2 with prefix 'digits' (saved as digits_1.jpeg, digits_2.jpeg...):
+  # 2. Capture from camera 2 with prefix 'digits' (saved into raw_images/ as digits_1.jpeg, digits_2.jpeg...):
   python capture_photo.py --camera 2 --prefix digits
 
   # 3. Capture from specific V4L2 device (e.g. /dev/video20) at 1280x720:
@@ -75,8 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Frame capture width (default: 640)")
     parser.add_argument("--height", type=int, default=480,
                         help="Frame capture height (default: 480)")
-    parser.add_argument("--output-dir", type=str, default=".",
-                        help="Directory to save captured photos (default: current directory '.')")
+    parser.add_argument("--output-dir", type=str, default="raw_images",
+                        help="Directory to save captured photos (default: 'raw_images')")
     parser.add_argument("--prefix", type=str, default="digits",
                         help="File prefix for saved photos (default: 'digits')")
     parser.add_argument("--ext", type=str, choices=["jpeg", "jpg", "png"], default="jpeg",
