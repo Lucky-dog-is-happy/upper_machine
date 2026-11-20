@@ -93,9 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
     # Block detection params
     parser.add_argument("--block-min-radius", type=int, default=20)
     parser.add_argument("--block-max-radius", type=int, default=150)
-    parser.add_argument("--block-min-circularity", type=float, default=0.60)
-    parser.add_argument("--block-min-fill", type=float, default=0.60)
-    parser.add_argument("--block-min-aspect", type=float, default=0.65)
+    parser.add_argument("--block-min-circularity", type=float, default=0.55)
+    parser.add_argument("--block-min-fill", type=float, default=0.54)
+    parser.add_argument("--block-min-aspect", type=float, default=0.60)
 
     # Black Ring detection params
     parser.add_argument("--ring-min-radius", type=int, default=60,
@@ -338,6 +338,7 @@ def main(argv: list[str] | None = None):
         else:
             blocks = detect_blocks(
                 hsv,
+                frame=frame_block,
                 min_radius=args.block_min_radius,
                 max_radius=args.block_max_radius,
                 min_fill_ratio=args.block_min_fill,

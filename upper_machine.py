@@ -79,25 +79,33 @@ COLOR_HSV = {
         "upper": np.array([78, 255, 255]),
         "bgr": (0, 255, 0),
     },
-    # 浅蓝/天蓝：实测色相中心位于 104 [102~112]，放宽 H 上限至 113，彻底避免物料被腰斩
+    # 浅蓝/天蓝：实测色相中心位于 104 [102~112]
     "sky-blue": {
         "lower": np.array([82, 45, 50]),
-        "upper": np.array([113, 255, 255]),
+        "upper": np.array([115, 255, 255]),
         "bgr": (255, 255, 0),
     },
-    # 深蓝：实测色相中心位于 117 [115~124]，锁定 H[114, 130]，放宽 S 下限至 60 容忍高光
+    # 深蓝：实测色相中心位于 117 [115~124]
     "blue": {
-        "lower": np.array([114, 60, 45]),
+        "lower": np.array([116, 60, 45]),
         "upper": np.array([130, 255, 255]),
         "bgr": (255, 0, 0),
     },
     # 黑色：限制 S 必须在 110 以下，防止把阴影下的暗色物料误判为黑
     "black": {
         "lower": np.array([0, 0, 0]),
-        "upper": np.array([179, 110, 90]),
+        "upper": np.array([180, 255, 80]),
         "bgr": (50, 50, 50),
     },
 }
+
+BLUE_COMBINED_HSV = {
+    "lower": np.array([82, 45, 45]),
+    "upper": np.array([130, 255, 255]),
+}
+BLUE_BPI_THRESH = 1.3
+BLUE_BG_RATIO_THRESH = 2.0
+BLUE_MAX_GREEN_THRESH = 50
 
 MIN_BLOCK_RADIUS = 20
 
@@ -308,20 +316,85 @@ def dedup_blocks(blocks: list[BlockInfo], tolerance: int = 20) -> list[BlockInfo
 
 
 def detect_blocks(hsv: np.ndarray,
+                  frame: np.ndarray | None = None,
                   min_radius: int = 20,
                   max_radius: int = 150,
-                  min_fill_ratio: float = 0.60,
-                  min_circularity: float = 0.60,
-                  min_aspect_ratio: float = 0.65) -> list[BlockInfo]:
+                  min_fill_ratio: float = 0.54,
+                  min_circularity: float = 0.55,
+                  min_aspect_ratio: float = 0.60) -> list[BlockInfo]:
     blocks = []
+    sample_bgr = None
+
     for name, cfg in COLOR_HSV.items():
-        if name == "red2":
+        if name in ("red2", "sky-blue"):
             continue
         if name == "red":
             mask1 = cv2.inRange(hsv, cfg["lower"], cfg["upper"])
             mask2 = cv2.inRange(hsv, COLOR_HSV["red2"]["lower"], COLOR_HSV["red2"]["upper"])
             mask = cv2.bitwise_or(mask1, mask2)
             mask = clean_mask(mask)
+        elif name == "blue":
+            # 蓝色系统一检测：合并覆盖天蓝与深蓝，避免分界处生硬切断轮廓
+            mask = get_mask(hsv, BLUE_COMBINED_HSV["lower"], BLUE_COMBINED_HSV["upper"])
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if area < np.pi * min_radius * min_radius:
+                    continue
+                (cx, cy), r = cv2.minEnclosingCircle(cnt)
+                if r < min_radius or r > max_radius:
+                    continue
+                # 滤除画面最底部车体反光噪点 (工作台物块均位于 cy <= 350)
+                if cy > 350:
+                    continue
+
+                x, y, w, h = cv2.boundingRect(cnt)
+                if max(w, h) == 0:
+                    continue
+                aspect_ratio = min(w, h) / max(w, h)
+                if aspect_ratio < min_aspect_ratio:
+                    continue
+
+                circle_area = np.pi * (r ** 2)
+                fill_ratio = area / circle_area if circle_area > 0 else 0
+                if fill_ratio < min_fill_ratio:
+                    continue
+
+                perimeter = cv2.arcLength(cnt, True)
+                if perimeter <= 0:
+                    continue
+                circularity = (4 * np.pi * area) / (perimeter ** 2)
+                if circularity < min_circularity:
+                    continue
+
+                # 采样内圈半径 0.5 核心区域计算色彩特征
+                c_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+                cv2.circle(c_mask, (int(cx), int(cy)), max(4, int(r * 0.5)), 255, -1)
+                if frame is not None:
+                    mean_b, mean_g, mean_r = cv2.mean(frame, mask=c_mask)[:3]
+                else:
+                    if sample_bgr is None:
+                        sample_bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+                    mean_b, mean_g, mean_r = cv2.mean(sample_bgr, mask=c_mask)[:3]
+                mean_h, mean_s, mean_v = cv2.mean(hsv, mask=c_mask)[:3]
+
+                # 判定深蓝 vs 天蓝：
+                # 1. 常规深蓝：绿通道极低 (G<=50) 或 蓝绿比极高 (B/G>=2.0) 或 色相纯正 (H>=113)
+                # 2. 强光过曝反光工况 (如 digits_17~19)：深蓝色相靠蓝 H>=107.5 且 R>=65
+                bg_ratio = mean_b / (mean_g + 1e-5)
+                if bg_ratio >= 2.0 or mean_g <= 50 or mean_h >= 113:
+                    final_name = "blue"
+                elif mean_h >= 107.5 and mean_r >= 65:
+                    final_name = "blue"
+                else:
+                    final_name = "sky-blue"
+
+                color_id = COLOR_NAME_TO_ID.get(final_name, 0)
+                blocks.append(BlockInfo(
+                    color=final_name, color_id=color_id,
+                    cx=int(cx), cy=int(cy), radius=int(r),
+                ))
+            continue
         else:
             mask = get_mask(hsv, cfg["lower"], cfg["upper"])
 
@@ -356,11 +429,34 @@ def detect_blocks(hsv: np.ndarray,
             if circularity < min_circularity:
                 continue
 
-            color_id = COLOR_NAME_TO_ID.get(name, 0)
-            blocks.append(BlockInfo(
-                color=name, color_id=color_id,
-                cx=int(cx), cy=int(cy), radius=int(r),
-            ))
+            if name == "blue":
+                # 二级色彩判别：深蓝 vs 天蓝（蓝绿比值法）
+                c_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+                cv2.circle(c_mask, (int(cx), int(cy)), max(4, int(r * 0.6)), 255, -1)
+                if frame is not None:
+                    mean_b, mean_g, _ = cv2.mean(frame, mask=c_mask)[:3]
+                else:
+                    if sample_bgr is None:
+                        sample_bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+                    mean_b, mean_g, _ = cv2.mean(sample_bgr, mask=c_mask)[:3]
+
+                ratio = mean_b / (mean_g + 1e-5)
+                if ratio >= BLUE_BG_RATIO_THRESH or mean_g <= BLUE_MAX_GREEN_THRESH:
+                    final_name = "blue"
+                else:
+                    final_name = "sky-blue"
+
+                color_id = COLOR_NAME_TO_ID.get(final_name, 0)
+                blocks.append(BlockInfo(
+                    color=final_name, color_id=color_id,
+                    cx=int(cx), cy=int(cy), radius=int(r),
+                ))
+            else:
+                color_id = COLOR_NAME_TO_ID.get(name, 0)
+                blocks.append(BlockInfo(
+                    color=name, color_id=color_id,
+                    cx=int(cx), cy=int(cy), radius=int(r),
+                ))
 
     if len(blocks) > 1:
         blocks = dedup_blocks(blocks, tolerance=20)
@@ -674,11 +770,11 @@ def main():
                         help="Initial detection mode (lower board overrides via MSG_MODE_CMD)")
     parser.add_argument("--block-min-radius", type=int, default=20, help="Min block radius (px)")
     parser.add_argument("--block-max-radius", type=int, default=150, help="Max block radius (px)")
-    parser.add_argument("--block-min-circularity", type=float, default=0.60,
+    parser.add_argument("--block-min-circularity", type=float, default=0.55,
                         help="Min circularity 4*pi*area/perimeter^2 (0.0~1.0)")
-    parser.add_argument("--block-min-fill", type=float, default=0.60,
+    parser.add_argument("--block-min-fill", type=float, default=0.54,
                         help="Min fill ratio area/(pi*r^2) (0.0~1.0)")
-    parser.add_argument("--block-min-aspect", type=float, default=0.65,
+    parser.add_argument("--block-min-aspect", type=float, default=0.60,
                         help="Min bounding rect aspect ratio (0.0~1.0)")
     parser.add_argument("--ring-min-radius", type=int, default=60, help="Min ring radius (px, default 60)")
     parser.add_argument("--ring-max-radius", type=int, default=200, help="Max ring radius (px)")
@@ -847,6 +943,7 @@ def main():
         else:
             blocks = detect_blocks(
                 hsv,
+                frame=frame_block,
                 min_radius=args.block_min_radius,
                 max_radius=args.block_max_radius,
                 min_fill_ratio=args.block_min_fill,

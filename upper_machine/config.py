@@ -47,13 +47,13 @@ COLOR_HSV = {
         "upper": np.array([78, 255, 255]),
         "bgr": (0, 255, 0),
     },
-    # 浅蓝/天蓝：实测色相中心位于 104 [102~112]，放宽 H 上限至 113，彻底避免物料被腰斩
+    # 浅蓝/天蓝：实测色相中心位于 104 [102~112]
     "sky-blue": {
         "lower": np.array([82, 45, 50]),
         "upper": np.array([115, 255, 255]),
         "bgr": (255, 255, 0),
     },
-    # 深蓝：实测色相中心位于 117 [115~124]，锁定 H[114, 130]，放宽 S 下限至 60 容忍高光
+    # 深蓝：实测色相中心位于 117 [115~124]
     "blue": {
         "lower": np.array([116, 60, 45]),
         "upper": np.array([130, 255, 255]),
@@ -66,6 +66,18 @@ COLOR_HSV = {
         "bgr": (50, 50, 50),
     },
 }
+
+# ── Blue family combined threshold & secondary classifier ────────────────────
+# 蓝色系统一检测区间（覆盖天蓝与深蓝全部范围，杜绝分界生硬切断轮廓）
+BLUE_COMBINED_HSV = {
+    "lower": np.array([82, 45, 45]),
+    "upper": np.array([130, 255, 255]),
+}
+# 纯蓝偏向指数 (Blue Preference Index) 与判定阈值：
+# BPI = (B / (G + 1e-5)) * (1.0 - R / (B + 1e-5))
+BLUE_BPI_THRESH = 1.3
+BLUE_BG_RATIO_THRESH = 2.0
+BLUE_MAX_GREEN_THRESH = 50
 
 
 # ── Ring HSV thresholds — black ring only ────────────────────────────────────
