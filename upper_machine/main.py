@@ -336,9 +336,14 @@ def main(argv: list[str] | None = None):
             ring_desc = f" [{', '.join(target_ids)}]" if target_ids else ""
             status = f"Mode: RING (black){ring_desc} | Rings: {len(rings)}"
         else:
+            active_target_colors = (
+                set(last_task_code.batch1_colors + last_task_code.batch2_colors)
+                if last_task_code.valid else None
+            )
             blocks = detect_blocks(
                 hsv,
                 frame=frame_block,
+                target_colors=active_target_colors,
                 min_radius=args.block_min_radius,
                 max_radius=args.block_max_radius,
                 min_fill_ratio=args.block_min_fill,

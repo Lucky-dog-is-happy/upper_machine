@@ -326,6 +326,7 @@ def dedup_blocks(blocks: list[BlockInfo], tolerance: int = 20) -> list[BlockInfo
 
 def detect_blocks(hsv: np.ndarray,
                   frame: np.ndarray | None = None,
+                  target_colors: set[int] | list[int] | None = None,
                   min_radius: int = 20,
                   max_radius: int = 150,
                   min_fill_ratio: float = 0.54,
@@ -376,27 +377,39 @@ def detect_blocks(hsv: np.ndarray,
                 if circularity < min_circularity:
                     continue
 
-                # 采样内圈半径 0.5 核心区域计算色彩特征
-                c_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-                cv2.circle(c_mask, (int(cx), int(cy)), max(4, int(r * 0.5)), 255, -1)
-                if frame is not None:
-                    mean_b, mean_g, mean_r = cv2.mean(frame, mask=c_mask)[:3]
-                else:
-                    if sample_bgr is None:
-                        sample_bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-                    mean_b, mean_g, mean_r = cv2.mean(sample_bgr, mask=c_mask)[:3]
-                mean_h, mean_s, mean_v = cv2.mean(hsv, mask=c_mask)[:3]
+                # ── 判定深蓝 (3) vs 天蓝 (6) ──
+                # 检查任务码先验约束：
+                has_blue = target_colors is not None and 3 in target_colors
+                has_skyblue = target_colors is not None and 6 in target_colors
 
-                # 判定深蓝 vs 天蓝：
-                # 1. 常规深蓝：绿通道极低 (G<=50) 或 蓝绿比极高 (B/G>=2.0) 或 色相纯正 (H>=113)
-                # 2. 强光过曝反光工况 (如 digits_17~19)：深蓝色相靠蓝 H>=107.5 且 R>=65
-                bg_ratio = mean_b / (mean_g + 1e-5)
-                if bg_ratio >= 2.0 or mean_g <= 50 or mean_h >= 113:
+                if has_blue and not has_skyblue:
+                    # 强先验：任务码只有深蓝(3)没有天蓝(6)，直接锁定深蓝，杜绝光照误判
                     final_name = "blue"
-                elif mean_h >= 107.5 and mean_r >= 65:
-                    final_name = "blue"
-                else:
+                elif has_skyblue and not has_blue:
+                    # 强先验：任务码只有天蓝(6)没有深蓝(3)，直接锁定天蓝，杜绝光照误判
                     final_name = "sky-blue"
+                else:
+                    # 任务码同时包含 3 和 6，或者无任务码（None/未识别），执行高精度二级色彩特征判别
+                    c_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+                    cv2.circle(c_mask, (int(cx), int(cy)), max(4, int(r * 0.5)), 255, -1)
+                    if frame is not None:
+                        mean_b, mean_g, mean_r = cv2.mean(frame, mask=c_mask)[:3]
+                    else:
+                        if sample_bgr is None:
+                            sample_bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+                        mean_b, mean_g, mean_r = cv2.mean(sample_bgr, mask=c_mask)[:3]
+                    mean_h, mean_s, mean_v = cv2.mean(hsv, mask=c_mask)[:3]
+
+                    # 判定深蓝 vs 天蓝：
+                    # 1. 常规深蓝：绿通道极低 (G<=50) 或 蓝绿比极高 (B/G>=2.0) 或 色相纯正 (H>=113)
+                    # 2. 强光过曝反光工况 (如 digits_17~19)：深蓝色相靠蓝 H>=107.5 且 R>=65
+                    bg_ratio = mean_b / (mean_g + 1e-5)
+                    if bg_ratio >= 2.0 or mean_g <= 50 or mean_h >= 113:
+                        final_name = "blue"
+                    elif mean_h >= 107.5 and mean_r >= 65:
+                        final_name = "blue"
+                    else:
+                        final_name = "sky-blue"
 
                 color_id = COLOR_NAME_TO_ID.get(final_name, 0)
                 blocks.append(BlockInfo(
@@ -995,9 +1008,14 @@ def main():
             ring_desc = f" [{', '.join(target_ids)}]" if target_ids else ""
             status = f"Mode: RING (black){ring_desc} | Rings: {len(rings)}"
         else:
+            active_target_colors = (
+                set(last_task_code.batch1_colors + last_task_code.batch2_colors)
+                if last_task_code.valid else None
+            )
             blocks = detect_blocks(
                 hsv,
                 frame=frame_block,
+                target_colors=active_target_colors,
                 min_radius=args.block_min_radius,
                 max_radius=args.block_max_radius,
                 min_fill_ratio=args.block_min_fill,
