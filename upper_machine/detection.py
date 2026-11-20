@@ -6,6 +6,8 @@ import numpy as np
 from .config import (
     COLOR_HSV, COLOR_NAME_TO_ID, RING_HSV, RING_BAND_INNER,
     BLUE_COMBINED_HSV, BLUE_BPI_THRESH, BLUE_BG_RATIO_THRESH, BLUE_MAX_GREEN_THRESH,
+    BLACK_VEHICLE_CUTOFF_Y, BLACK_CORE_V_MAX, BLACK_CORE_RATIO_MIN,
+    BLACK_MIN_ASPECT_RATIO, BLACK_MIN_FILL_RATIO, BLACK_MIN_SOLIDITY, BLACK_MIN_CIRC_APPROX,
     BlockInfo, RingInfo,
 )
 from .digit import (
@@ -122,6 +124,74 @@ def detect_blocks(hsv: np.ndarray,
                 color_id = COLOR_NAME_TO_ID.get(final_name, 0)
                 blocks.append(BlockInfo(
                     color=final_name, color_id=color_id,
+                    cx=int(cx), cy=int(cy), radius=int(r),
+                ))
+            continue
+        elif name == "black":
+            # 黑色物块检测：
+            # 1. 物理屏蔽底盘前唇与阴影连通区 (y >= BLACK_VEHICLE_CUTOFF_Y 设为高亮白)
+            cutoff_y = int(BLACK_VEHICLE_CUTOFF_Y * hsv.shape[0] / 480.0)
+            hsv_black = hsv.copy()
+            hsv_black[cutoff_y:, :] = [0, 0, 255]
+            mask = cv2.inRange(hsv_black, cfg["lower"], cfg["upper"])
+
+            # 2. 形态学滤波：先 5x5 椭圆核 open 溶断细微粘连毛刺，再 5x5 close 填补空洞
+            k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k_open)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_close)
+
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if area < np.pi * min_radius * min_radius:
+                    continue
+                (cx, cy), r = cv2.minEnclosingCircle(cnt)
+                if r < min_radius or r > max_radius:
+                    continue
+                if cy > 350:
+                    continue
+
+                x, y, w, h = cv2.boundingRect(cnt)
+                if max(w, h) == 0:
+                    continue
+                aspect_ratio = min(w, h) / max(w, h)
+                if aspect_ratio < BLACK_MIN_ASPECT_RATIO:
+                    continue
+
+                circle_area = np.pi * (r ** 2)
+                fill_ratio = area / circle_area if circle_area > 0 else 0
+                if fill_ratio < BLACK_MIN_FILL_RATIO:
+                    continue
+
+                # 针对黑色边缘毛刺与多边形拟合评估圆度与实心度
+                perim = cv2.arcLength(cnt, True)
+                if perim <= 0:
+                    continue
+                approx = cv2.approxPolyDP(cnt, 0.015 * perim, True)
+                perim_approx = cv2.arcLength(approx, True)
+                circ_approx = (4 * np.pi * area) / (perim_approx ** 2) if perim_approx > 0 else 0
+
+                hull = cv2.convexHull(cnt)
+                hull_area = cv2.contourArea(hull)
+                solidity = area / hull_area if hull_area > 0 else 0
+
+                if circ_approx < BLACK_MIN_CIRC_APPROX and solidity < BLACK_MIN_SOLIDITY:
+                    continue
+
+                # 核心区实心度校验（排除空心黑环与浅色底面）
+                c_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+                cv2.circle(c_mask, (int(cx), int(cy)), max(4, int(r * 0.5)), 255, -1)
+                mean_v = cv2.mean(hsv[:, :, 2], mask=c_mask)[0]
+                core_pixels = hsv[:, :, 2][c_mask > 0]
+                core_black_ratio = float(np.mean(core_pixels <= 70))
+
+                if core_black_ratio < BLACK_CORE_RATIO_MIN or mean_v > BLACK_CORE_V_MAX:
+                    continue
+
+                color_id = COLOR_NAME_TO_ID.get("black", 5)
+                blocks.append(BlockInfo(
+                    color="black", color_id=color_id,
                     cx=int(cx), cy=int(cy), radius=int(r),
                 ))
             continue

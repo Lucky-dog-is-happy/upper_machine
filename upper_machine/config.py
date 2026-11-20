@@ -59,13 +59,22 @@ COLOR_HSV = {
         "upper": np.array([130, 255, 255]),
         "bgr": (255, 0, 0),
     },
-    # 黑色：限制 S 必须在 110 以下，防止把阴影下的暗色物料误判为黑
+    # 黑色：V 上限收紧至 58（物块实测 V<=45，地影漫反射 V>=65），杜绝阴影粘连
     "black": {
         "lower": np.array([0, 0, 0]),
-        "upper": np.array([180, 255, 80]),
+        "upper": np.array([180, 255, 58]),
         "bgr": (50, 50, 50),
     },
 }
+
+# ── Black block parameters ───────────────────────────────────────────────────
+BLACK_VEHICLE_CUTOFF_Y = 320  # Default y-cutoff at 480p to sever chassis shadow (buffer below blocks)
+BLACK_CORE_V_MAX = 70         # Core region mean V threshold
+BLACK_CORE_RATIO_MIN = 0.50   # Core region black pixel ratio (V <= 70) minimum
+BLACK_MIN_ASPECT_RATIO = 0.50
+BLACK_MIN_FILL_RATIO = 0.48
+BLACK_MIN_SOLIDITY = 0.80
+BLACK_MIN_CIRC_APPROX = 0.40
 
 # ── Blue family combined threshold & secondary classifier ────────────────────
 # 蓝色系统一检测区间（覆盖天蓝与深蓝全部范围，杜绝分界生硬切断轮廓）
