@@ -98,15 +98,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--block-min-aspect", type=float, default=0.60)
 
     # Black Ring detection params
-    parser.add_argument("--ring-min-radius", type=int, default=60,
-                        help="Min ring radius (px, default 60)")
-    parser.add_argument("--ring-max-radius", type=int, default=200)
-    parser.add_argument("--ring-min-area", type=int, default=100,
-                        help="Min black pixel count inside ring annulus (default 100, adaptive for small rings)")
-    parser.add_argument("--ring-param2", type=float, default=0.72,
-                        help="HoughCircles param2 (circle perfectness, 0~1, default 0.72)")
-    parser.add_argument("--digit-min-conf", type=float, default=0.65,
-                        help="Min confidence threshold for digit recognition (default: 0.65)")
+    parser.add_argument("--ring-min-radius", type=int, default=25,
+                        help="Min ring radius (px, default 25, supports elevated distant camera)")
+    parser.add_argument("--ring-max-radius", type=int, default=220)
+    parser.add_argument("--ring-min-area", type=int, default=40,
+                        help="Min black pixel count inside ring annulus (default 40, adaptive for small/elevated rings)")
+    parser.add_argument("--ring-param2", type=float, default=0.62,
+                        help="HoughCircles param2 (circle perfectness, 0~1, default 0.62, tolerant to perspective ellipse)")
+    parser.add_argument("--digit-min-conf", type=float, default=0.55,
+                        help="Min confidence threshold for digit recognition (default: 0.55)")
 
     parser.add_argument("--flip-h", action="store_true",
                         help="Horizontally flip camera frame (for mirrored cameras)")

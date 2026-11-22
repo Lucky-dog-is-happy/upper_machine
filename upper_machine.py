@@ -551,7 +551,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  param2: float = 0.72,
                  digit_classifier: "DigitClassifier | None" = None,
                  max_rings: int = 3,
-                 digit_min_conf: float = 0.65) -> list[RingInfo]:
+                 digit_min_conf: float = 0.55) -> list[RingInfo]:
     """Detect ground black circular rings and classify inner digits 1, 2, 3."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -610,6 +610,10 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     rings = []
     for idx, (cx, cy, r, _) in enumerate(selected):
         target_id = assigned_ids[idx]
+        # 取消 ID 5: 无有效数字 (1, 2, 3) 的圆环不识别、不作为目标输出
+        if target_id not in (1, 2, 3):
+            continue
+
         conf = 1.0
         if digit_classifier is not None and HAS_DIGIT_CLASSIFIER and target_id in (1, 2, 3):
             conf = scores_list[idx].get(target_id, 1.0)
@@ -715,10 +719,12 @@ class SerialSender:
 
     def send_rings(self, rings: list[RingInfo]):
         # Same layout as MSG_VISION, only the msg_id differs (MSG_RING)
-        count = min(len(rings), 3)
+        # 取消 ID 5: 仅发送数字编号为 1, 2, 3 的圆环；无有效数字时发送 count=0
+        valid_rings = [r for r in rings if getattr(r, "digit_id", r.color_id) in (1, 2, 3)]
+        count = min(len(valid_rings), 3)
         ring_data = b""
         desc_list = []
-        for r in rings[:count]:
+        for r in valid_rings[:count]:
             target_id = getattr(r, "digit_id", r.color_id)
             ring_data += struct.pack("<Bfff", target_id,
                                      float(r.cx), float(r.cy), float(r.radius))
@@ -770,19 +776,16 @@ def draw_blocks(display: np.ndarray, blocks: list[BlockInfo]):
 
 def draw_rings(display: np.ndarray, rings: list[RingInfo]):
     for r in rings:
-        digit = getattr(r, "digit_id", 5)
+        digit = getattr(r, "digit_id", r.color_id)
+        if digit not in (1, 2, 3):
+            continue
         conf = getattr(r, "confidence", 1.0)
-        if digit in (1, 2, 3):
-            outline_color = (0, 255, 0)
-            label = f"Target #{digit} ({r.cx},{r.cy}) r={r.radius} [{conf:.2f}]"
-            center_text = str(digit)
-        else:
-            outline_color = (0, 255, 255)
-            label = f"Ring (unknown) ({r.cx},{r.cy}) r={r.radius}"
-            center_text = "?"
+        outline_color = (0, 255, 0)
+        label = f"Target #{digit} ({r.cx},{r.cy}) r={r.radius} [{conf:.2f}]"
+        center_text = str(digit)
 
         cv2.circle(display, (r.cx, r.cy), r.radius, outline_color, 2)
-        cv2.circle(display, (r.cx, r.cy), max(1, int(r.radius * 0.65)), (100, 100, 100), 1)
+        cv2.circle(display, (r.cx, r.cy), max(1, int(r.radius * 0.40)), (100, 100, 100), 1)
         cv2.circle(display, (r.cx, r.cy), 4, (0, 0, 255), -1)
         cv2.putText(display, label, (r.cx - r.radius, max(15, r.cy - r.radius - 8)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, outline_color, 1)
@@ -843,14 +846,14 @@ def main():
                         help="Min fill ratio area/(pi*r^2) (0.0~1.0)")
     parser.add_argument("--block-min-aspect", type=float, default=0.60,
                         help="Min bounding rect aspect ratio (0.0~1.0)")
-    parser.add_argument("--ring-min-radius", type=int, default=60, help="Min ring radius (px, default 60)")
+    parser.add_argument("--ring-min-radius", type=int, default=35, help="Min ring radius (px, default 35)")
     parser.add_argument("--ring-max-radius", type=int, default=200, help="Max ring radius (px)")
-    parser.add_argument("--ring-min-area", type=int, default=100,
-                        help="Min ring color area (px) to accept a ring (default 100, adaptive for small rings)")
+    parser.add_argument("--ring-min-area", type=int, default=60,
+                        help="Min ring color area (px) to accept a ring (default 60, adaptive for small rings)")
     parser.add_argument("--ring-param2", type=float, default=0.72,
                         help="HoughCircles param2 (circle perfectness, default 0.72) for ring detection")
-    parser.add_argument("--digit-min-conf", type=float, default=0.65,
-                        help="Min confidence threshold for digit recognition (default: 0.65)")
+    parser.add_argument("--digit-min-conf", type=float, default=0.55,
+                        help="Min confidence threshold for digit recognition (default: 0.55)")
     parser.add_argument("--flip-h", action="store_true",
                         help="Horizontally flip camera frame (for mirrored cameras)")
     parser.add_argument("--flip-v", action="store_true",

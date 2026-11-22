@@ -279,10 +279,10 @@ def dedup_concentric_circles(circles: list[tuple[int, int, int]],
 
 def detect_rings(frame: np.ndarray, hsv: np.ndarray,
                  min_radius: int, max_radius: int, min_color_area: int,
-                 param2: float = 0.72,
+                 param2: float = 0.62,
                  digit_classifier: DigitClassifier | None = None,
                  max_rings: int = 3,
-                 digit_min_conf: float = 0.65) -> list[RingInfo]:
+                 digit_min_conf: float = 0.55) -> list[RingInfo]:
     """Detect black circular rings on the ground and classify inner digits (1, 2, 3).
 
     Pipeline:
@@ -294,7 +294,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gauss = cv2.GaussianBlur(gray, (3, 3), 0)
     circles = cv2.HoughCircles(
-        gauss, cv2.HOUGH_GRADIENT_ALT, 1.2, minDist=max(50, int(min_radius * 0.8)),
+        gauss, cv2.HOUGH_GRADIENT_ALT, 1.2, minDist=max(20, int(min_radius * 0.7)),
         param1=100, param2=param2,
         minRadius=min_radius, maxRadius=max_radius,
     )
@@ -302,7 +302,8 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
         return []
 
     circles = np.round(circles.reshape((-1, 3))).astype(int)
-    circles = dedup_concentric_circles([(int(c[0]), int(c[1]), int(c[2])) for c in circles])
+    dedup_tol = max(10, int(min_radius * 0.4))
+    circles = dedup_concentric_circles([(int(c[0]), int(c[1]), int(c[2])) for c in circles], tolerance=dedup_tol)
 
     # Direct black mask for ring verification (use gentler (3,3) kernel to protect thin lines)
     black_cfg = RING_HSV["black"]
@@ -326,7 +327,7 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
 
         # Adaptive area requirement: thin ring lines scale with circumference (~2*pi*r).
         # Capped by min_color_area so small circles (r < 90) are not unfairly dropped.
-        adaptive_threshold = max(30, int(2 * np.pi * r * 0.35))
+        adaptive_threshold = max(15, int(2 * np.pi * r * 0.22))
         effective_min_area = min(min_color_area, adaptive_threshold)
         if black_area < effective_min_area:
             continue
@@ -353,13 +354,17 @@ def detect_rings(frame: np.ndarray, hsv: np.ndarray,
     rings = []
     for idx, (cx, cy, r, _) in enumerate(selected):
         target_id = assigned_ids[idx]
+        # 取消 ID 5: 无有效数字 (1, 2, 3) 的圆环不识别、不作为目标输出
+        if target_id not in (1, 2, 3):
+            continue
+
         conf = 1.0
         if digit_classifier is not None and target_id in (1, 2, 3):
             conf = scores_list[idx].get(target_id, 1.0)
 
         rings.append(RingInfo(
             color="black",
-            color_id=target_id,  # 1, 2, 3 for digit, 5 for unknown black ring
+            color_id=target_id,  # 1, 2, 3 for digit
             cx=cx,
             cy=cy,
             radius=r,

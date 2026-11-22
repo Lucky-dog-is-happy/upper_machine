@@ -108,10 +108,12 @@ class SerialSender:
     def send_rings(self, rings: list[RingInfo]):
         if not self.link:
             return
-        count = min(len(rings), 3)
+        # 取消 ID 5: 仅发送具有有效数字 1, 2, 3 的圆环；无有效数字环时发送 0 个目标以保持心跳
+        valid_rings = [r for r in rings if getattr(r, "digit_id", r.color_id) in (1, 2, 3)]
+        count = min(len(valid_rings), 3)
         ring_data = b""
         desc_list = []
-        for r in rings[:count]:
+        for r in valid_rings[:count]:
             target_id = getattr(r, "digit_id", r.color_id)
             ring_data += struct.pack("<Bfff", target_id,
                                      float(r.cx), float(r.cy), float(r.radius))

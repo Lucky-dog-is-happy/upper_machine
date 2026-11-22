@@ -147,6 +147,9 @@ class DigitClassifier:
         # 3. Mid-Waist Beam Span Discrimination (Y 40% ~ 60%)
         # Digit 3 has a prominent horizontal middle beam spanning >= 48% of total width.
         # Digit 1 is a uniform vertical column strictly < 35% with no cross beam.
+        # 3. Mid-Waist Beam Span Discrimination (Y 40% ~ 60%)
+        # Digit 3 has a prominent horizontal middle beam spanning >= 46% of total width.
+        # Digit 1 is a uniform vertical column strictly < 38% with no cross beam.
         mid_strip = t[int(th * 0.40):int(th * 0.60), :]
         mid_spans = []
         for row in mid_strip:
@@ -155,15 +158,11 @@ class DigitClassifier:
                 mid_spans.append((idx[-1] - idx[0] + 1) / float(tw))
         max_mid_span = max(mid_spans) if mid_spans else 0.0
 
-        # Physical exclusion rule:
-        if aspect < 1.80:
-            if max_mid_span >= 0.48:
-                # Prominent horizontal middle beam on normal character: definitively NOT 1, strongly boost 3
-                s_final[3] *= 1.35
-                s_final[1] *= 0.20  # Completely cuts off the 3 -> 1 confusion path
-        elif aspect >= 1.80:
-            # Slender uniform column (aspect >= 1.80): definitively favors 1
-            s_final[1] *= 1.35
+        if max_mid_span >= 0.46:
+            # Prominent horizontal middle beam: definitively NOT 1, cut 1 off
+            s_final[1] *= 0.20
+        elif max_mid_span < 0.38 and aspect >= 1.60:
+            # Slender uniform column without middle beam: definitively NOT 3, cut 3 off
             s_final[3] *= 0.20
 
         # 4. Lower-mid centroid discrimination (Y 65% ~ 82% horizontal centroid X)
@@ -175,16 +174,19 @@ class DigitClassifier:
 
         if aspect < 1.85:
             if cg_x <= 0.38:
-                s_final[2] *= 1.15
+                s_final[2] *= 1.10
                 s_final[3] *= 0.85
             elif cg_x >= 0.60:
-                s_final[3] *= 1.15
+                s_final[3] *= 1.10
                 s_final[2] *= 0.85
 
         return {d: max(0.0, min(1.0, float(s))) for d, s in s_final.items()}
 
     def evaluate(self, binary_crop: np.ndarray) -> dict[int, float]:
-        """Return confidence scores (0.0 ~ 1.0) by selecting the most confident, consistent view orientation."""
+        """Return confidence scores (0.0 ~ 1.0) by selecting the most confident view orientation.
+
+        Supports full 360-degree rotation invariance (0 deg, 90 deg CW, 180 deg, 270 deg CCW, and mirrored).
+        """
         h, w = binary_crop.shape[:2]
         if h < 8 or w < 3:
             return {1: 0.0, 2: 0.0, 3: 0.0}
@@ -193,6 +195,7 @@ class DigitClassifier:
             binary_crop,
             cv2.rotate(binary_crop, cv2.ROTATE_180),
             cv2.rotate(binary_crop, cv2.ROTATE_90_CLOCKWISE),
+            cv2.rotate(binary_crop, cv2.ROTATE_90_COUNTERCLOCKWISE),
             cv2.flip(binary_crop, 1),
         ]
 
@@ -267,17 +270,35 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
 
     roi = frame[y1:y2, x1:x2]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    local_cx = cx - x1
+    local_cy = cy - y1
 
     # Circular mask strictly inside inner_r
     circular_mask = np.zeros(gray.shape, dtype=np.uint8)
-    local_cx = cx - x1
-    local_cy = cy - y1
     cv2.circle(circular_mask, (local_cx, local_cy), inner_r, 255, -1)
 
+    inner_pixels = gray[circular_mask > 0]
+    if len(inner_pixels) == 0:
+        return {1: 0.0, 2: 0.0, 3: 0.0}
+
+    # 1. 核心灰度动态范围与对比度门限校验
+    # 抬高摄像头后距离较远，细笔画受亚像素混叠影响 rng 会自然收缩至 40~55，结合标准差自适应放宽
+    gray_rng = int(np.ptp(inner_pixels))
+    gray_std = float(np.std(inner_pixels))
+    if gray_rng < 38 or (gray_rng < 52 and gray_std < 11.0) or gray_std < 9.0:
+        return {1: 0.0, 2: 0.0, 3: 0.0}
+
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
     # Inverse Otsu for dark digit on light background
     _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     thresh = cv2.bitwise_and(thresh, circular_mask)
+
+    # 2. 前景黑色像素占空比校验 (数字笔画在内圆占比通常在 4% ~ 42%，排除极碎杂点与大片阴影/环内壁)
+    fg_count = cv2.countNonZero(thresh)
+    circle_area = cv2.countNonZero(circular_mask)
+    fg_ratio = fg_count / max(1, circle_area)
+    if fg_ratio < 0.04 or fg_ratio > 0.42:
+        return {1: 0.0, 2: 0.0, 3: 0.0}
 
     # Light morphological close to bridge fine stroke gaps without bridging to borders
     kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
@@ -287,20 +308,44 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
     if not contours:
         return {1: 0.0, 2: 0.0, 3: 0.0}
 
-    min_area = max(15, int(np.pi * (inner_r ** 2) * 0.02))
-    max_area = int(np.pi * (inner_r ** 2) * 0.85)
+    min_area = max(8, int(np.pi * (inner_r ** 2) * 0.025))
+    max_area = int(np.pi * (inner_r ** 2) * 0.45)
 
     candidates = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if area < min_area or area > max_area:
             continue
-        bx, by, bw, bh = cv2.boundingRect(cnt)
-        cnt_cx = bx + bw / 2.0
-        cnt_cy = by + bh / 2.0
+
+        # 使用图像矩 (Image Moments) 计算像素物理质心，杜绝斜角/楔形阴影利用外接矩形中心逃逸
+        M = cv2.moments(cnt)
+        if M["m00"] > 0:
+            cnt_cx = M["m10"] / M["m00"]
+            cnt_cy = M["m01"] / M["m00"]
+        else:
+            bx, by, bw, bh = cv2.boundingRect(cnt)
+            cnt_cx = bx + bw / 2.0
+            cnt_cy = by + bh / 2.0
+
         dist_to_center = np.hypot(cnt_cx - local_cx, cnt_cy - local_cy)
-        if dist_to_center <= inner_r * 0.65:
-            candidates.append((cnt, area, dist_to_center, bx, by, bw, bh))
+        # 真实数字质心严格位于内圆核心区域内，小尺寸下预留离散化容差
+        if dist_to_center > max(6.0, inner_r * 0.50):
+            continue
+
+        bx, by, bw, bh = cv2.boundingRect(cnt)
+        # 3. 直立宽高比校验: 数字 1/2/3 均为竖向直立字符 (H/W >= 1.10)，排除横向扁平噪点块
+        aspect = bh / max(1.0, float(bw))
+        if aspect < 1.10:
+            continue
+
+        # 4. 实心度/凸包镂空校验: 数字 1/2/3 存在笔画弯折和凹陷镂空，solidity 必须在 0.20 ~ 0.70 之间，排除实心团块
+        hull = cv2.convexHull(cnt)
+        hull_area = cv2.contourArea(hull)
+        solidity = area / max(1.0, hull_area)
+        if solidity > 0.70 or solidity < 0.20:
+            continue
+
+        candidates.append((cnt, area, dist_to_center, bx, by, bw, bh))
 
     if not candidates:
         return {1: 0.0, 2: 0.0, 3: 0.0}
@@ -309,7 +354,17 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
     largest = max(candidates, key=lambda c: c[1])
     cnt_largest = largest[0]
     crop_largest = deskew_and_crop(thresh, cnt_largest)
+
+    # 5. 笔画均匀度校验: 数字 1 是一根均匀立柱，顶部与底部笔画宽度比绝不超 2.0 (排除斜三角形/楔形阴影)
+    hc, wc = crop_largest.shape[:2]
+    top_w = np.mean([np.count_nonzero(row) for row in crop_largest[:max(1, hc // 3)] if np.count_nonzero(row) > 0]) or 0.0
+    bot_w = np.mean([np.count_nonzero(row) for row in crop_largest[2 * hc // 3:] if np.count_nonzero(row) > 0]) or 0.0
+    taper_ratio = max(top_w, bot_w) / max(0.1, min(top_w, bot_w)) if (top_w > 0 and bot_w > 0) else 1.0
+
     best_scores = classifier.evaluate(crop_largest)
+    if taper_ratio > 1.85:
+        # 明显楔形梯形阴影，坚决惩罚 1
+        best_scores[1] *= 0.15
 
     # If multiple fragments exist, evaluate deskewed merged cluster
     if len(candidates) > 1:
@@ -323,8 +378,8 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
 
 
 def match_rings_to_digits(ring_scores_list: list[dict[int, float]],
-                          min_confidence: float = 0.65,
-                          min_margin: float = 0.10) -> list[int]:
+                          min_confidence: float = 0.55,
+                          min_margin: float = 0.06) -> list[int]:
     """Globally assign unique digits (1, 2, 3) to up to 3 rings without duplicate conflicts.
 
     Includes deadband protection: if top score does not beat 2nd place by at least

@@ -19,22 +19,18 @@ def draw_blocks(display: np.ndarray, blocks: list[BlockInfo]) -> None:
 
 def draw_rings(display: np.ndarray, rings: list[RingInfo]) -> None:
     for r in rings:
-        digit = getattr(r, "digit_id", 5)
+        digit = getattr(r, "digit_id", r.color_id)
+        if digit not in (1, 2, 3):
+            continue
         conf = getattr(r, "confidence", 1.0)
-
-        if digit in (1, 2, 3):
-            outline_color = (0, 255, 0)   # Green outline for confirmed target
-            label = f"Target #{digit} ({r.cx},{r.cy}) r={r.radius} [{conf:.2f}]"
-            center_text = str(digit)
-        else:
-            outline_color = (0, 255, 255) # Yellow outline for unknown digit ring
-            label = f"Ring (unknown) ({r.cx},{r.cy}) r={r.radius}"
-            center_text = "?"
+        outline_color = (0, 255, 0)   # Green outline for confirmed target
+        label = f"Target #{digit} ({r.cx},{r.cy}) r={r.radius} [{conf:.2f}]"
+        center_text = str(digit)
 
         # Outer circle outline
         cv2.circle(display, (r.cx, r.cy), r.radius, outline_color, 2)
         # Inner search core boundary
-        cv2.circle(display, (r.cx, r.cy), max(1, int(r.radius * 0.65)), (100, 100, 100), 1)
+        cv2.circle(display, (r.cx, r.cy), max(1, int(r.radius * 0.40)), (100, 100, 100), 1)
         # Center dot
         cv2.circle(display, (r.cx, r.cy), 4, (0, 0, 255), -1)
 
