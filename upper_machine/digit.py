@@ -47,6 +47,15 @@ def _render_digit_with_cv2(digit: int, size: int = 80) -> np.ndarray:
     return img
 
 
+# ── Golden exemplar templates extracted from high-fidelity contest images ──────────
+# Standard sans-serif contest font (Arial/Helvetica style) 32x32 packed into 128 bytes each
+GOLDEN_TEMPLATES_HEX = {
+    1: "000000000000000000000000000018000000f8000003f8000007b800000e3800000038000000380000003800000038000000380000003800000038000000380000003800000038000000380000003800000038000000380000003800000038000000380000003800000038000000380000003800000000000000000000000000",
+    2: "00000000000000000000000000000000001ff00000703c0000601e0000400e0000000e0000000e0000000e0000000e0000001e0000001e0000003c00000078000000f0000001f0000003c000000f8000001f0000003e0000003c0000007800000070000000700000007fff00007fff00007fff00000000000000000000000000",
+    3: "00000000000000000000000000030000001ff000007ffc0000603c0000003c0000001c0000001c0000003c0000003800000038000000f0000007e000001ff000001ff80000003e0000001e0000000e0000000e0000000e0000000e0000000e0000001e0000003c000073f800007ff000007fc000000000000000000000000000",
+}
+
+
 def make_square_aspect_preserved(crop: np.ndarray, target_size: int = NORM_SIZE, max_inner: int = 26) -> np.ndarray:
     """Resize binary crop while strictly preserving aspect ratio, preventing slender digits from squashing."""
     h, w = crop.shape[:2]
@@ -66,6 +75,15 @@ def make_square_aspect_preserved(crop: np.ndarray, target_size: int = NORM_SIZE,
 def create_digit_templates(size: int = NORM_SIZE) -> dict[int, list[np.ndarray]]:
     """Generate normalized multi-font templates for 1, 2, 3 with aspect ratio preservation."""
     templates: dict[int, list[np.ndarray]] = {1: [], 2: [], 3: []}
+
+    # Style 0: High-fidelity Golden Exemplar from actual contest targets (highest priority)
+    for digit in [1, 2, 3]:
+        hex_data = GOLDEN_TEMPLATES_HEX.get(digit)
+        if hex_data:
+            raw_bytes = bytes.fromhex(hex_data)
+            unpacked = np.unpackbits(np.frombuffer(raw_bytes, dtype=np.uint8)).reshape((32, 32))
+            golden_img = (unpacked * 255).astype(np.uint8)
+            templates[digit].append(golden_img)
 
     font_candidates = [
         "/usr/share/fonts/noto/NotoSans-Bold.ttf",
@@ -165,7 +183,33 @@ class DigitClassifier:
             # Slender uniform column without middle beam: definitively NOT 3, cut 3 off
             s_final[3] *= 0.20
 
-        # 4. Lower-mid centroid discrimination (Y 65% ~ 82% horizontal centroid X)
+        # 4. Double Cavity Topology for Digit 3 vs Single Base for Digit 2
+        # Digit 3 has two deep indents on the left side (upper and lower openings).
+        # Digit 2 has a flat solid left-extended base (lower indent is negative or zero).
+        norm_h, norm_w = norm.shape[:2]
+        left_xs = []
+        for y_idx in range(norm_h):
+            cols = np.where(norm[y_idx] > 100)[0]
+            left_xs.append(cols[0] / float(norm_w) if len(cols) > 0 else 1.0)
+
+        upper_strip = [left_xs[y] for y in range(int(norm_h * 0.22), int(norm_h * 0.42))]
+        mid_strip_l = [left_xs[y] for y in range(int(norm_h * 0.44), int(norm_h * 0.58))]
+        lower_strip = [left_xs[y] for y in range(int(norm_h * 0.62), int(norm_h * 0.80))]
+        if upper_strip and mid_strip_l and lower_strip:
+            min_mid = min(mid_strip_l)
+            up_indent = max(upper_strip) - min_mid
+            low_indent = max(lower_strip) - min_mid
+            if up_indent >= 0.12 and low_indent >= 0.12:
+                # Confirmed double cavity: definitively 3, boost 3, suppress 2 & 1
+                s_final[3] *= 1.20
+                s_final[2] *= 0.70
+                s_final[1] *= 0.50
+            elif low_indent <= 0.02 and up_indent >= 0.10:
+                # Solid bottom-left base with upper curve: definitively 2
+                s_final[2] *= 1.15
+                s_final[3] *= 0.70
+
+        # 5. Lower-mid centroid discrimination (Y 65% ~ 82% horizontal centroid X)
         # Digit 2 has diagonal stroke leaning left (cg_x <= 0.38)
         # Digit 3 has lower circle curve leaning right (cg_x >= 0.60)
         lower_mid = t[int(th * 0.65):int(th * 0.82), :]
@@ -303,6 +347,10 @@ def extract_digit_scores_from_ring(frame: np.ndarray,
     # Light morphological close to bridge fine stroke gaps without bridging to borders
     kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+    if inner_r <= 28:
+        # 相机抬高小半径场景追加水平定向闭运算，保护数字 3 中腰细横梁连通
+        k_horiz = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, k_horiz, iterations=1)
 
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
