@@ -23,6 +23,7 @@ MSG_RING = 0x02           # 色环检测结果（批量，上位机->下位机�
 MSG_TASK_CODE = 0x03      # 任务码（上位机->下位机）
 MSG_MODE_CMD = 0x04       # 检测模式指令（下位机->上位机）
 MSG_GRIPPER_COUNT = 0x05  # 抓取与放置统计指令（下位机->上位机）
+MSG_QR_RESET = 0x06       # 刷新/重新识别二维码指令（下位机->上位机）
 
 MODE_BLOCK = 0            # 识别物料
 MODE_RING = 1             # 识别色环
@@ -43,6 +44,7 @@ class SerialRxEvents:
     place_delta: int = 0
     set_pick: int | None = None
     set_place: int | None = None
+    qr_reset: bool = False
 
 
 class SerialSender:
@@ -141,16 +143,16 @@ class SerialSender:
             try:
                 frame = self.link.receive(timeout=0)
                 payload = frame.payload
-                if len(payload) < 2:
+                if len(payload) < 1:
                     continue
 
                 msg_id = payload[0]
-                if msg_id == MSG_MODE_CMD:
+                if msg_id == MSG_MODE_CMD and len(payload) >= 2:
                     mode = payload[1]
                     if mode in (MODE_BLOCK, MODE_RING):
                         events.new_mode = mode
 
-                elif msg_id == MSG_GRIPPER_COUNT:
+                elif msg_id == MSG_GRIPPER_COUNT and len(payload) >= 2:
                     action = payload[1]
                     if action == GRIPPER_PICK_INC:
                         events.pick_delta += 1
@@ -166,6 +168,9 @@ class SerialSender:
                     elif action == GRIPPER_SET and len(payload) >= 4:
                         events.set_pick = int(payload[2])
                         events.set_place = int(payload[3])
+
+                elif msg_id == MSG_QR_RESET:
+                    events.qr_reset = True
 
             except Empty:
                 break

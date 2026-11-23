@@ -26,6 +26,11 @@ class ThreadedCamera:
 
     def start(self) -> bool:
         if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(self.src)
+            if self.cap.isOpened():
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        if not self.cap.isOpened():
             return False
         self.running = True
         self.thread = threading.Thread(target=self._update, daemon=True)

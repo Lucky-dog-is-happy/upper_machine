@@ -222,9 +222,33 @@ def main(argv: list[str] | None = None):
     consecutive_block_fails = 0
     mode = MODE_RING if args.mode == "ring" else MODE_BLOCK
 
+    def trigger_qr_reset():
+        nonlocal qr_active, last_task_code, qr_candidate, qr_match_count
+        nonlocal qr_send_until, last_qr_send_time, task_code_sent
+        if args.no_qr or cam_qr is None:
+            print("[QR Reset] Ignored: QR camera is disabled (--no-qr).")
+            return
+        last_task_code = TaskCode()
+        qr_candidate = ""
+        qr_match_count = 0
+        qr_send_until = 0.0
+        last_qr_send_time = 0.0
+        task_code_sent = False
+        if task_display:
+            task_display.set_task_code(None)
+        if not qr_active:
+            cv2.namedWindow(WIN_QR)
+            qr_active = cam_qr.start()
+            if qr_active:
+                print(f"[QR Reset] QR camera re-activated and state cleared.")
+            else:
+                print(f"[QR Reset ERROR] Failed to re-open QR camera {qr_cam_src}.", file=sys.stderr)
+        else:
+            print("[QR Reset] State cleared (QR camera was already scanning).")
+
     print(f"Running. Initial mode={'RING' if mode == MODE_RING else 'BLOCK'}. "
           f"QR broadcast={args.qr_send_duration}s @ every {args.qr_send_interval}s.\n"
-          "ESC=quit  m=toggle mode  p=print detections")
+          "ESC=quit  m=toggle mode  p=print detections  r=reset QR")
 
     # ════════════════════════════════════════════════════════════════════════
     #  MAIN LOOP
@@ -238,6 +262,10 @@ def main(argv: list[str] | None = None):
             if events.new_mode is not None and events.new_mode != mode:
                 mode = events.new_mode
                 print(f"[RX] Mode -> {'RING' if mode == MODE_RING else 'BLOCK'}")
+
+            if events.qr_reset:
+                print("[RX] Received MSG_QR_RESET (0x06) from lower board. Resetting QR scanner.")
+                trigger_qr_reset()
 
             if task_display:
                 if events.set_pick is not None:
@@ -420,6 +448,9 @@ def main(argv: list[str] | None = None):
         elif key == ord("m"):  # toggle mode manually
             mode = MODE_BLOCK if mode == MODE_RING else MODE_RING
             print(f"[key] Mode -> {'RING' if mode == MODE_RING else 'BLOCK'}")
+        elif key == ord("r"):  # manual reset QR code scanning
+            print("[key] Manual QR reset triggered.")
+            trigger_qr_reset()
         elif key == ord("p"):  # print current detections
             if mode == MODE_RING:
                 if rings:
